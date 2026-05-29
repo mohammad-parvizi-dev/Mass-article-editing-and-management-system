@@ -165,7 +165,7 @@ app.get("/api/health", (req, res) => {
 // AI Configuration info for UI
 app.get("/api/ai/config", (req, res) => {
   res.json({
-    openRouterEnabled: !!process.env.OPENROUTER_API_KEY,
+    openRouterEnabled: true,
     defaultModel: process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash",
   });
 });
