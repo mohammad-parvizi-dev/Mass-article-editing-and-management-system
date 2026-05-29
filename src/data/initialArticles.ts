@@ -1,0 +1,50 @@
+import { Article } from "../types";
+
+export const INITIAL_ARTICLES: Article[] = [
+  {
+    id: "101",
+    category_id: "5",
+    is_published: "1",
+    base_image: "https://images.unsplash.com/photo-1541963463532-d68292c34b19?auto=format&fit=crop&w=800&q=80",
+    title: "راهنمای سفر به اصفهان نصف جهان",
+    slug: "travel-to-isfahan-guide",
+    description: "نگاهی کامل به جاذبه‌های تاریخی، فرهنگی، هنری اصفهان و بهترین بازه‌های زمانی برای سفر به پایتخت فرهنگی ایران.",
+    body: `<h2>مقدمه</h2><p>اصفهان با داشتن صدها اثر تاریخی برجسته در زمره برترین مقاصد گردشگری تاریخی جهان است. میدان نقش جهان، عمارت عالی‌قاپو و سی‌وسه‌پل شاهکارهای مهندسی دوران صفوی هستند.</p><h3>نقاط دیدنی</h3><ul><li>میدان نقش جهان</li><li>مسجد شاه</li><li>پل خواجو</li></ul>`,
+    view_count: "1240",
+    reading_time: "5",
+    en_title: "Isfahan Travel Guide - Half of the World",
+    en_description: "A complete look at the historical, cultural, and artistic attractions of Isfahan and the best times to visit Iran's cultural capital.",
+    en_body: "<h2>Introduction</h2><p>Isfahan, boasting hundreds of prominent historical monuments, ranks among the top historical tourism destinations globally. Naqsh-e Jahan Square, Ali Qapu Palace, and Si-o-se-pol are masterpieces of Safavid engineering.</p>",
+    ar_title: "دليل السفر إلى أصفهان - نصف العالم",
+    ar_description: "نظرة كاملة على المعالم التاريخية والثقافية والفنية في أصفهان وأفضل الأوقات لزيارة العاصمة الثقافية لإيران.",
+    ar_body: "<h2>مقدمة</h2><p>تعتبر أصفهان ، التي تزخر بمئات الآثار التاريخية البارزة ، من بين أفضل وجهات السياحة التاريخية على مستوى العالم.</p>",
+    deleted_at: "",
+    created_at: "2026-05-01 10:00:00",
+    updated_at: "2026-05-20 12:00:00",
+    tags: "سفر, اصفهان, گردشگری",
+    isEdited: false
+  },
+  {
+    id: "102",
+    category_id: "2",
+    is_published: "0",
+    base_image: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=800&q=80",
+    title: "تأثیر هوش مصنوعی بر فرآیندهای تولید محتوا در سال ۲۰۲۶",
+    slug: "impact-of-ai-on-content-generation-2026",
+    description: "بررسی عمیق چگونگی تغییر چشم‌انداز وبلاگ‌نویسی و روزنامه‌نگاری توسط مدل‌های زبانی پیشرفته و تصویرسازها.",
+    body: `<h2>تغییر پارادایم</h2><p>نویسندگان مدرن امروزه از هوش مصنوعی به عنوان یک دستیار قدرتمند برای افزایش سرعت تحقیق و بهینه‌سازی خوانایی استفاده می‌کنند.</p>`,
+    view_count: "450",
+    reading_time: "6",
+    en_title: "The Impact of AI on Content Generation in 2026",
+    en_description: "A deep dive into how advanced language models and image generator AI are reshaping the blogging and journalism landscape.",
+    en_body: "<h2>Paradigm Shift</h2><p>Modern writers today leverage AI as a powerful co-pilot to accelerate research and optimize readability structures.</p>",
+    ar_title: "تأثير الذكاء الاصطناعي على صناعة المحتوى في عام 2026",
+    ar_description: "دراسة متعمقة في كيفية قيام النماذج اللغوية المتقدمة ومولدي الصور بإعادة تشكيل مشهد التدوين والصحافة.",
+    ar_body: "<h2>تحول نموذجي</h2><p>يستغل الكتاب المعاصرون اليوم الذكاء الاصطناعي كمساعد قوي لتسريع البحث وتحسين هياكل القراءة.</p>",
+    deleted_at: "",
+    created_at: "2026-05-18 14:22:00",
+    updated_at: "2026-05-19 16:30:11",
+    tags: "هوش مصنوعی, تکنولوژی, تولید محتوا",
+    isEdited: false
+  }
+];

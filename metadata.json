@@ -1,0 +1,6 @@
+{
+  "name": "Smart Article Management System",
+  "description": "A multilingual article management and publishing panel equipped with Gemini-powered assisted translation and expansion copilot features.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
