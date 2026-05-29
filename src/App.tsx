@@ -10,8 +10,15 @@ import OpenRouterModelSelector from "./components/OpenRouterModelSelector";
 import { ShieldCheck, Sparkles, BookOpen, Heart, RefreshCw } from "lucide-react";
 
 export default function App() {
-  const [openRouterEnabled, setOpenRouterEnabled] = useState(false);
-  const [openRouterModels, setOpenRouterModels] = useState<{ id: string; name: string }[]>([]);
+  const [openRouterEnabled, setOpenRouterEnabled] = useState(true);
+  const [openRouterModels, setOpenRouterModels] = useState<{ id: string; name: string }[]>([
+    { id: "google/gemini-2.5-flash", name: "Google: Gemini 2.5 Flash" },
+    { id: "google/gemini-2.5-pro", name: "Google: Gemini 2.5 Pro" },
+    { id: "deepseek/deepseek-chat", name: "DeepSeek: Chat" },
+    { id: "openai/gpt-4o-mini", name: "OpenAI: GPT-4o Mini" },
+    { id: "meta-llama/llama-3-8b-instruct:free", name: "Meta: Llama 3 8B Instruct (Free)" },
+    { id: "anthropic/claude-3.5-sonnet", name: "Anthropic: Claude 3.5 Sonnet" }
+  ]);
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     return localStorage.getItem("openrouter_global_model") || "google/gemini-2.5-flash";
   });
@@ -46,24 +53,16 @@ export default function App() {
 
   // Fetch OpenRouter activation and models list
   useEffect(() => {
-    fetch("/api/ai/config")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.openRouterEnabled) {
-          setOpenRouterEnabled(true);
-          setModelsLoading(true);
-          fetch("/api/ai/models")
-            .then((r) => r.json())
-            .then((modelData) => {
-              if (modelData && Array.isArray(modelData.data)) {
-                setOpenRouterModels(modelData.data);
-              }
-            })
-            .catch((err) => console.error("Error loading OpenRouter models list", err))
-            .finally(() => setModelsLoading(false));
+    setModelsLoading(true);
+    fetch("/api/ai/models")
+      .then((r) => r.json())
+      .then((modelData) => {
+        if (modelData && Array.isArray(modelData.data)) {
+          setOpenRouterModels(modelData.data);
         }
       })
-      .catch((err) => console.error("Error loading config status", err));
+      .catch((err) => console.error("Error loading OpenRouter models list", err))
+      .finally(() => setModelsLoading(false));
   }, []);
 
   const handleModelChange = (model: string) => {
