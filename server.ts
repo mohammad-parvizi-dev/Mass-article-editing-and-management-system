@@ -9,7 +9,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Set up JSON body parser with a large limit for base64 uploads
 app.use(express.json({ limit: "50mb" }));
@@ -329,7 +329,7 @@ async function start() {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     // Serve SPA routes
-    app.get("*all", (req, res) => {
+    app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

@@ -63,7 +63,13 @@ export default function App() {
   useEffect(() => {
     setModelsLoading(true);
     fetch("/api/ai/models")
-      .then((r) => r.json())
+      .then((r) => {
+        const contentType = r.headers.get("content-type");
+        if (!r.ok || (contentType && contentType.includes("text/html"))) {
+          throw new Error("پاسخ سرور قالب وب‌سایت HTML است. این نشان می‌دهد سرور شما در Coolify به عنوان یک پروژه استاتیک (Static / Pure HTML / React SPA) پیکربندی شده و کدهای سرور Node.js (فایل server.ts) اجرا نمی‌شوند، یا مسیریابی وب‌سرور (Nginx) درخواست‌های /api را به بک‌اند پروکسی نمی‌کند. لطفاً نوع پروژه را در کولیفای روی NodeJS / Custom Dockerfile تنظیم کنید.");
+        }
+        return r.json();
+      })
       .then((modelData) => {
         if (modelData) {
           if (Array.isArray(modelData.data)) {
