@@ -11,13 +11,17 @@ interface OpenRouterModelSelectorProps {
   selectedModel: string;
   onModelChange: (model: string) => void;
   isLoading: boolean;
+  isFallback?: boolean;
+  errorDetails?: string | null;
 }
 
 export default function OpenRouterModelSelector({
   models,
   selectedModel,
   onModelChange,
-  isLoading
+  isLoading,
+  isFallback,
+  errorDetails
 }: OpenRouterModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -67,7 +71,7 @@ export default function OpenRouterModelSelector({
 
       {/* Dropdown Panel */}
       {isOpen && (
-        <div className="absolute right-0 mt-1.5 w-72 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col max-h-96">
+        <div className="absolute right-0 mt-1.5 w-72 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col max-h-[430px]">
           {/* Header & Search box */}
           <div className="p-2 border-b border-white/5 bg-white/[0.02] space-y-1.5">
             <div className="flex items-center justify-between px-1.5 pt-0.5">
@@ -79,6 +83,17 @@ export default function OpenRouterModelSelector({
                 {models.length} مدل لود شده
               </span>
             </div>
+
+            {isFallback && (
+              <div className="bg-amber-950/45 border border-amber-500/25 text-amber-200 p-2 rounded-lg text-[10px] leading-relaxed select-text" dir="rtl">
+                ⚠️ <span className="text-amber-400 font-black">بارگذاری زنده ناموفق بود!</span> سرور شما نتوانست لیست زنده مدل‌ها را از OpenRouter دریافت کند (لیست زیر آفلاین است).
+                {errorDetails && (
+                  <div className="mt-1 font-mono text-[9px] text-amber-400/80 bg-black/40 p-1 rounded overflow-x-auto select-all max-h-16 text-left" dir="ltr">
+                    {errorDetails}
+                  </div>
+                )}
+              </div>
+            )}
             
             <div className="relative">
               <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />

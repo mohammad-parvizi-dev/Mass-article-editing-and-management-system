@@ -54,7 +54,8 @@ async function callAIService({
   systemInstruction?: string;
   model?: string;
 }): Promise<string> {
-  const openRouterApiKey = process.env.OPENROUTER_API_KEY;
+  const rawKey = process.env.OPENROUTER_API_KEY;
+  const openRouterApiKey = rawKey ? rawKey.replace(/['"]/g, "").trim() : "";
   const userOpenRouterModel = model || process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash";
 
   if (openRouterApiKey) {
@@ -173,24 +174,65 @@ app.get("/api/ai/config", (req, res) => {
 // Fetch active OpenRouter models dynamic list
 app.get("/api/ai/models", async (req, res) => {
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/models");
+    const rawKey = process.env.OPENROUTER_API_KEY;
+    const cleanKey = rawKey ? rawKey.replace(/['"]/g, "").trim() : "";
+    
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "User-Agent": "aistudio-build/2.4",
+    };
+
+    if (cleanKey) {
+      headers["Authorization"] = `Bearer ${cleanKey}`;
+      const safePrefix = cleanKey.substring(0, 10);
+      const safeSuffix = cleanKey.substring(cleanKey.length - 4);
+      console.log(`[API /api/ai/models] Loaded OpenRouter API Key. Length: ${cleanKey.length} chars. Pattern: ${safePrefix}...${safeSuffix}`);
+    } else {
+      console.log("[API /api/ai/models] Attention: No OPENROUTER_API_KEY found or it evaluates to empty string.");
+    }
+
+    console.log("[API /api/ai/models] Dispatching fetch request to https://openrouter.ai/api/v1/models...");
+    const response = await fetch("https://openrouter.ai/api/v1/models", {
+      method: "GET",
+      headers,
+    });
+
     if (!response.ok) {
-      throw new Error(`Failed to fetch models from OpenRouter: ${response.statusText}`);
+      const errBody = await response.text().catch(() => "N/A");
+      throw new Error(`OpenRouter answered with status ${response.status}: ${response.statusText}. Response body: ${errBody}`);
     }
 
     const data = await response.json();
-    res.json(data);
+    if (data && Array.isArray(data.data) && data.data.length > 0) {
+      console.log(`[API /api/ai/models] Success! Dynamically fetched and verified ${data.data.length} active models from OpenRouter.`);
+      res.json({
+        data: data.data,
+        isFallback: false
+      });
+    } else {
+      throw new Error("Invalid or empty data structure returned from OpenRouter API.");
+    }
   } catch (error: any) {
-    console.error("Failed to load models from OpenRouter endpoint, using default list:", error);
+    console.error("[API /api/ai/models] Error loading models dynamically:", error.message || error);
+    
+    // Comprehensive premium list of models to choose from if network is blocked
     res.json({
       data: [
         { id: "google/gemini-2.5-flash", name: "Google: Gemini 2.5 Flash" },
         { id: "google/gemini-2.5-pro", name: "Google: Gemini 2.5 Pro" },
+        { id: "deepseek/deepseek-chat", name: "DeepSeek: V3 (Chat)" },
+        { id: "deepseek/deepseek-r1", name: "DeepSeek: R1 (Reasoning)" },
         { id: "openai/gpt-4o-mini", name: "OpenAI: GPT-4o Mini" },
+        { id: "openai/gpt-4o", name: "OpenAI: GPT-4o" },
+        { id: "anthropic/claude-3.5-sonnet", name: "Anthropic: Claude 3.5 Sonnet" },
+        { id: "anthropic/claude-3.5-haiku", name: "Anthropic: Claude 3.5 Haiku" },
         { id: "meta-llama/llama-3-8b-instruct:free", name: "Meta: Llama 3 8B Instruct (Free)" },
-        { id: "deepseek/deepseek-chat", name: "DeepSeek: Chat" },
-        { id: "anthropic/claude-3.5-sonnet", name: "Anthropic: Claude 3.5 Sonnet" }
-      ]
+        { id: "meta-llama/llama-3.3-70b-instruct", name: "Meta: Llama 3.3 70B Instruct" },
+        { id: "qwen/qwen-2.5-72b-instruct", name: "Qwen: Qwen 2.5 72B Instruct" },
+        { id: "mistralai/mistral-large", name: "Mistral: Mistral Large" }
+      ],
+      isFallback: true,
+      errorDetails: error.message || String(error)
     });
   }
 });

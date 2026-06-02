@@ -14,15 +14,23 @@ export default function App() {
   const [openRouterModels, setOpenRouterModels] = useState<{ id: string; name: string }[]>([
     { id: "google/gemini-2.5-flash", name: "Google: Gemini 2.5 Flash" },
     { id: "google/gemini-2.5-pro", name: "Google: Gemini 2.5 Pro" },
-    { id: "deepseek/deepseek-chat", name: "DeepSeek: Chat" },
+    { id: "deepseek/deepseek-chat", name: "DeepSeek: V3 (Chat)" },
+    { id: "deepseek/deepseek-r1", name: "DeepSeek: R1 (Reasoning)" },
     { id: "openai/gpt-4o-mini", name: "OpenAI: GPT-4o Mini" },
+    { id: "openai/gpt-4o", name: "OpenAI: GPT-4o" },
+    { id: "anthropic/claude-3.5-sonnet", name: "Anthropic: Claude 3.5 Sonnet" },
+    { id: "anthropic/claude-3.5-haiku", name: "Anthropic: Claude 3.5 Haiku" },
     { id: "meta-llama/llama-3-8b-instruct:free", name: "Meta: Llama 3 8B Instruct (Free)" },
-    { id: "anthropic/claude-3.5-sonnet", name: "Anthropic: Claude 3.5 Sonnet" }
+    { id: "meta-llama/llama-3.3-70b-instruct", name: "Meta: Llama 3.3 70B Instruct" },
+    { id: "qwen/qwen-2.5-72b-instruct", name: "Qwen: Qwen 2.5 72B Instruct" },
+    { id: "mistralai/mistral-large", name: "Mistral: Mistral Large" }
   ]);
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     return localStorage.getItem("openrouter_global_model") || "google/gemini-2.5-flash";
   });
   const [modelsLoading, setModelsLoading] = useState(false);
+  const [isFallback, setIsFallback] = useState(false);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
 
   // Load database from local storage if available, fallback to beautiful defaults
   const [articles, setArticles] = useState<Article[]>(() => {
@@ -57,11 +65,24 @@ export default function App() {
     fetch("/api/ai/models")
       .then((r) => r.json())
       .then((modelData) => {
-        if (modelData && Array.isArray(modelData.data)) {
-          setOpenRouterModels(modelData.data);
+        if (modelData) {
+          if (Array.isArray(modelData.data)) {
+            setOpenRouterModels(modelData.data);
+          }
+          if (modelData.isFallback) {
+            setIsFallback(true);
+            setErrorDetails(modelData.errorDetails || "Unknown backend error");
+          } else {
+            setIsFallback(false);
+            setErrorDetails(null);
+          }
         }
       })
-      .catch((err) => console.error("Error loading OpenRouter models list", err))
+      .catch((err) => {
+        console.error("Error loading OpenRouter models list", err);
+        setIsFallback(true);
+        setErrorDetails(err.message || String(err));
+      })
       .finally(() => setModelsLoading(false));
   }, []);
 
@@ -208,6 +229,8 @@ export default function App() {
                   selectedModel={selectedModel}
                   onModelChange={handleModelChange}
                   isLoading={modelsLoading}
+                  isFallback={isFallback}
+                  errorDetails={errorDetails}
                 />
               </div>
             )}
