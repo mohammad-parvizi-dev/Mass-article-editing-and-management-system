@@ -425,7 +425,7 @@ app.post("/api/gemini/expand", async (req, res) => {
 // AI Taxonomy Analysis and Multi-level Category Recommendation endpoint
 app.post("/api/ai/categorize-taxonomy", async (req, res) => {
   try {
-    const { articles, model } = req.body;
+    const { articles, existingTaxonomy, batchIndex, totalBatches, model } = req.body;
     if (!articles || !Array.isArray(articles) || articles.length === 0) {
       return res.status(400).json({ error: "لیست مقالات برای تحلیل الزامی است." });
     }
@@ -440,19 +440,19 @@ app.post("/api/ai/categorize-taxonomy", async (req, res) => {
     }));
 
     const systemInstruction = `You are an expert AI content taxonomist, SEO architect, and enterprise CMS metadata strategist.
-Your task is to analyze the provided set of articles and produce a clean, professional, highly intuitive multi-level category tree (taxonomy) with trilingual titles (Persian, English, Arabic) and URL-friendly English slugs.
+Your task is to analyze the provided batch of articles and produce/update a clean, professional multi-level category tree (taxonomy) with trilingual titles (Persian, English, Arabic) and URL-friendly English slugs.
 
 CRITICAL MANDATORY RULES FOR TAXONOMY & CLASSIFICATION:
-1. DEEP ANALYSIS & LOGICAL TAXONOMY STRUCTURE:
-   - First, analyze all provided article titles, descriptions, and tags as a unified content corpus to identify clear macro-topics (e.g. Web Development, SEO & Content Strategy, Artificial Intelligence, Digital Marketing, Business & Management, Design & UI/UX, etc.).
-   - Create broad, professional, well-structured CMS top-level categories and logical subcategories.
-   - Avoid creating overly narrow, fragmented, or redundant categories. Keep top-level categories logical and comprehensive.
+1. DYNAMIC TAXONOMY OPTIMIZATION, MERGING & EDITING AUTHORITY:
+   - When an existing taxonomy tree ("existingCategoriesTree") is provided, you have FULL AUTHORITY to refine, edit, rename, or merge existing categories and subcategories if the new articles reveal a cleaner macro-structure.
+   - You MAY move previously categorized articles into new or different subcategories if the new structure offers a better, more specific fit.
+   - You MUST CONSOLIDATE duplicate or overlapping categories (e.g., merge redundant topics into a single parent/subcategory node).
+   - ALL previously categorized article IDs MUST remain present in the updated tree. DO NOT lose or drop any article IDs from previous batches.
 
 2. UNIQUE PRIMARY CLASSIFICATION (STRICT 1:1 ARTICLE ASSIGNMENT):
-   - EVERY ARTICLE ID MUST BE ASSIGNED TO EXACTLY ONE SINGLE CATEGORY OR SUBCATEGORY NODE IN "existingCategoriesTree".
+   - EVERY ARTICLE ID across all processed batches MUST BE ASSIGNED TO EXACTLY ONE SINGLE CATEGORY OR SUBCATEGORY NODE IN "existingCategoriesTree".
    - DO NOT REPEAT ANY ARTICLE ID ACROSS MULTIPLE CATEGORIES OR SUBCATEGORIES.
    - IF AN ARTICLE BELONGS TO A SUBCATEGORY, PLACE ITS ID ONLY IN THAT SUBCATEGORY'S "articleIds" ARRAY, NOT IN THE PARENT CATEGORY'S ARRAY.
-   - THE SUM OF ALL ARTICLE COUNTS ACROSS ALL CATEGORY NODES MUST EQUAL 100% OF THE INPUT ARTICLES WITHOUT ANY DUPLICATION.
 
 3. REQUIRED JSON FIELD FORMATS:
    - "slug": lower-case URL-friendly English slug (e.g. "digital-marketing", "seo-strategy", "web-development")
@@ -469,68 +469,39 @@ CRITICAL MANDATORY RULES FOR TAXONOMY & CLASSIFICATION:
    - "existingCategoriesTree": Array of top-level category objects (with subcategories and articleIds).
    - "proposedNewCategoriesTree": Array of newly suggested categories (with empty "articleIds": []) for future content expansion, including a "suggestedReason" in Persian for each.
 
-Output MUST be purely valid JSON without markdown code fences or conversational boilerplate.
-
-Example JSON Structure:
-{
-  "title": "درخت تحلیل و دسته‌بندی جامع و تخصصی مقالات",
-  "summary": "تحلیل هوش مصنوعی نشان می‌دهد که مقالات در ۵ خوشه اصلی شامل دیجیتال مارکتینگ، هوش مصنوعی، توسعه وب، مدیریت و طراحی قرار گرفته‌اند...",
-  "existingCategoriesTree": [
-    {
-      "id": "cat_1",
-      "slug": "digital-marketing",
-      "nameFa": "بازاریابی دیجیتال",
-      "nameEn": "Digital Marketing",
-      "nameAr": "التسويق الرقمي",
-      "name": "بازاریابی دیجیتال",
-      "enName": "Digital Marketing",
-      "description": "دسته‌بندی جامع استراتژی‌های بازاریابی دیجیتال و تبلیغات آنلاین",
-      "articleIds": [],
-      "subcategories": [
-        {
-          "id": "sub_1_1",
-          "slug": "seo-content-strategy",
-          "nameFa": "سئو و استراتژی محتوا",
-          "nameEn": "SEO & Content Strategy",
-          "nameAr": "سيو واستراتيجية المحتوى",
-          "name": "سئو و استراتژی محتوا",
-          "enName": "SEO & Content Strategy",
-          "description": "بهینه‌سازی موتورهای جستجو و تولید محتوای ارزشمند",
-          "articleIds": ["1", "2", "3"],
-          "subcategories": []
-        }
-      ]
-    }
-  ],
-  "proposedNewCategoriesTree": [
-    {
-      "id": "prop_1",
-      "slug": "ai-agents-automation",
-      "nameFa": "ایجنت‌ها و اتوماسیون هوش مصنوعی",
-      "nameEn": "AI Agents & Automation",
-      "nameAr": "وکلاء الذکاء الاصطناعي والأتمتة",
-      "name": "ایجنت‌ها و اتوماسیون هوش مصنوعی",
-      "enName": "AI Agents & Automation",
-      "description": "استفاده از ایجنت‌های هوشمند برای خودکارسازی فرآیندها",
-      "suggestedReason": "با توجه به رشد روزافزون ابزارهای ایجنت‌محور، ساخت این دسته برای مقالات آینده توصیه می‌شود.",
-      "articleIds": [],
-      "subcategories": []
-    }
-  ]
-}`;
+Output MUST be purely valid JSON without markdown code fences or conversational boilerplate.`;
 
     const allArticleIdsList = simplifiedArticles.map((a: any) => String(a.id));
-    const prompt = `شما باید تمام ${simplifiedArticles.length} مقاله زیر را بر اساس عنوان، توضیحات و کلیدواژه‌ها تحلیل کرده و در یک درخت دسته‌بندی استاندارد و حرفه‌ای قرار دهید.
+    
+    let prompt = "";
+    if (existingTaxonomy && Array.isArray(existingTaxonomy.existingCategoriesTree) && existingTaxonomy.existingCategoriesTree.length > 0) {
+      prompt = `درخت دسته‌بندی فعلی حاصل از تحلیل بسته‌های قبلی به شرح زیر است:
+${JSON.stringify(existingTaxonomy.existingCategoriesTree, null, 2)}
 
-قانون کلیدی و غیرقابل تغییر: هر مقاله باید دقیقاً و فقط در ۱ دسته یا زیردسته قرار گیرد (بدون هیچ تکراری در دسته‌های دیگر).
+اکنون بسته شماره ${batchIndex || 1} از ${totalBatches || 1} شامل ${simplifiedArticles.length} مقاله جدید زیر ارائه می‌شود.
 
-لیست کامل شناسه (${simplifiedArticles.length} مقاله):
+دستورالعمل مهم بازبینی و جانمایی:
+۱. مقالات جدید این بسته را در دسته‌های موجود جانمایی کنید یا در صورت نیاز دسته‌ها/زیردسته‌های جدید بسازید.
+۲. شما اجازه کامل دارید که دسته‌بندی‌های موجود را ویرایش، اصلاح یا ادغام نمایید تا از ایجاد دسته‌های تکراری و موازی جلوگیری شود.
+۳. در صورت نیاز می‌توانید مقالات بسته‌های قبلی را نیز به زیردسته‌های جدیدتر و تخصصی‌تر منتقل کنید تا درخت نهایی کاملاً منطقی، یکدست و بدون تکرار باشد.
+۴. تمامی شناسه‌های مقالات بسته‌های قبلی همراه با مقالات این بسته باید در درخت نهایی حفظ شوند.
+
+شناسه‌های مقالات جدید در این بسته:
 [${allArticleIdsList.join(", ")}]
 
-اطلاعات کامل مقالات جهت تحلیل موضوعی:
+اطلاعات مقالات جدید این بسته:
 ${JSON.stringify(simplifiedArticles, null, 2)}`;
+    } else {
+      prompt = `شما باید تمام ${simplifiedArticles.length} مقاله زیر در بسته اولیه را بر اساس عنوان، توضیحات و کلیدواژه‌ها تحلیل کرده و ساختار درخت دسته‌بندی ۳ زبانه همراه با اسلاگ بسازید.
 
-    console.log(`[Categorize Taxonomy] Analyzing ${simplifiedArticles.length} articles with model ${model || "default"}...`);
+شناسه‌های مقالات این بسته اولیه:
+[${allArticleIdsList.join(", ")}]
+
+اطلاعات مقالات این بسته:
+${JSON.stringify(simplifiedArticles, null, 2)}`;
+    }
+
+    console.log(`[Categorize Taxonomy] Analyzing batch ${batchIndex || 1}/${totalBatches || 1} (${simplifiedArticles.length} articles) with model ${model || "default"}...`);
 
     const rawResult = await callAIService({
       prompt,
@@ -555,7 +526,7 @@ ${JSON.stringify(simplifiedArticles, null, 2)}`;
       taxonomyData.proposedNewCategoriesTree = [];
     }
 
-    // SERVER-SIDE STRICT DEDUPLICATION & 100% COVERAGE GUARANTEE:
+    // SERVER-SIDE STRICT DEDUPLICATION & COVERAGE GUARANTEE:
     // Ensure every article ID appears in at most 1 category/subcategory node across the entire tree.
     const globalAssignedIds = new Set<string>();
 
@@ -563,7 +534,6 @@ ${JSON.stringify(simplifiedArticles, null, 2)}`;
       if (!Array.isArray(nodes)) return;
       for (const node of nodes) {
         if (Array.isArray(node.articleIds)) {
-          // Filter articleIds to keep only those not previously assigned
           node.articleIds = node.articleIds
             .map((id: any) => String(id))
             .filter((id: string) => {
@@ -585,11 +555,11 @@ ${JSON.stringify(simplifiedArticles, null, 2)}`;
 
     cleanTreeNodes(taxonomyData.existingCategoriesTree);
 
-    // Find any unmapped article IDs
+    // Find any unmapped article IDs from current batch
     const unmappedIds = allArticleIdsList.filter((id: string) => !globalAssignedIds.has(id));
 
     if (unmappedIds.length > 0) {
-      console.log(`[Categorize Taxonomy] Notice: ${unmappedIds.length} articles unassigned by AI. Auto-assigning to General category...`);
+      console.log(`[Categorize Taxonomy] Notice: ${unmappedIds.length} articles in batch unassigned by AI. Auto-assigning to General category...`);
 
       let generalCat = taxonomyData.existingCategoriesTree.find((cat: any) =>
         cat.slug === "general-articles" ||
@@ -628,7 +598,7 @@ ${JSON.stringify(simplifiedArticles, null, 2)}`;
       success: true,
       data: {
         ...taxonomyData,
-        totalArticlesAnalyzed: simplifiedArticles.length,
+        totalArticlesAnalyzed: globalAssignedIds.size,
         updatedAt: new Date().toISOString(),
       },
     });

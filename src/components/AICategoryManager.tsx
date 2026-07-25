@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, MouseEvent } from "react";
+import React, { useState, useEffect, useMemo, useRef, MouseEvent } from "react";
 import { Article, TaxonomyCategory, TaxonomyResult } from "../types";
 import {
   FolderTree,
@@ -18,7 +18,11 @@ import {
   Zap,
   Check,
   Globe,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Terminal,
+  StopCircle,
+  Layers,
+  FileText
 } from "lucide-react";
 
 interface AICategoryManagerProps {
@@ -38,6 +42,14 @@ export default function AICategoryManager({
   const [loadingStep, setLoadingStep] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Batching & Real-time Logs State
+  const [batchSize, setBatchSize] = useState<number>(30);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [showLogs, setShowLogs] = useState<boolean>(true);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; percent: number } | null>(null);
+  const isCancelledRef = useRef<boolean>(false);
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
   // Cached taxonomy result state
   const [taxonomy, setTaxonomy] = useState<TaxonomyResult | null>(() => {
@@ -64,6 +76,28 @@ export default function AICategoryManager({
     () => articles.filter((a) => a.is_published !== "2"),
     [articles]
   );
+
+  // Auto-scroll logs terminal to bottom on update
+  useEffect(() => {
+    if (logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [logs]);
+
+  // Count total assigned articles in taxonomy tree
+  const countArticlesInTree = (nodes?: TaxonomyCategory[]): number => {
+    if (!nodes || !Array.isArray(nodes)) return 0;
+    let count = 0;
+    nodes.forEach((n) => {
+      if (n.articleIds && Array.isArray(n.articleIds)) {
+        count += n.articleIds.length;
+      }
+      if (n.subcategories && Array.isArray(n.subcategories)) {
+        count += countArticlesInTree(n.subcategories);
+      }
+    });
+    return count;
+  };
 
   // Track article IDs assigned to any category in taxonomy tree
   const mappedArticleIdsSet = useMemo(() => {
@@ -203,63 +237,131 @@ export default function AICategoryManager({
     setExpandedNodes({});
   };
 
-  // Run AI taxonomy analysis
+  // Run AI Incremental Batch Taxonomy Analysis
   const handleAnalyzeTaxonomy = async () => {
     if (!articles || articles.length === 0) {
       setError("هیچ مقاله‌ای برای تحلیل وجود ندارد.");
       return;
     }
 
+    const activeArticlesList = articles.filter((a) => a.is_published !== "2");
+    if (activeArticlesList.length === 0) {
+      setError("هیچ مقاله فعالی برای تحلیل یافت نشد.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSuccessMsg(null);
-    setLoadingStep("ارسال مقالات فعال به سرویس هوش مصنوعی...");
+    setLogs([]);
+    setShowLogs(true);
+    isCancelledRef.current = false;
+
+    // Split active articles into batches of size `batchSize`
+    const chunks: Article[][] = [];
+    for (let i = 0; i < activeArticlesList.length; i += batchSize) {
+      chunks.push(activeArticlesList.slice(i, i + batchSize));
+    }
+
+    const addLog = (msg: string) => {
+      const timeStr = new Date().toLocaleTimeString("fa-IR");
+      setLogs((prev) => [...prev, `[${timeStr}] ${msg}`]);
+    };
+
+    addLog(`🚀 شروع تحلیل هوشمند دسته‌بندی با مدل انتخاب شده: ${selectedModel}`);
+    addLog(`📊 تعداد کل مقالات: ${activeArticlesList.length} مقاله | اندازه هر بسته: ${batchSize} تایی | تعداد بسته‌ها: ${chunks.length}`);
+
+    let currentTaxonomy: TaxonomyResult | null = null;
 
     try {
-      const activeArticles = articles.filter((a) => a.is_published !== "2");
+      for (let index = 0; index < chunks.length; index++) {
+        if (isCancelledRef.current) {
+          addLog(`⚠️ فرآیند بسته‌ای توسط کاربر متوقف شد.`);
+          setSuccessMsg("پردازش بسته‌ای متوقف شد. درخت دسته‌بندی استخراج شده تا این مرحله حفظ گردید.");
+          break;
+        }
 
-      setLoadingStep(`درحال خوشه‌بندی موضوعی ${activeArticles.length} مقاله و استخراج دسته‌های ۳ زبانه همراه با اسلاگ...`);
+        const chunk = chunks[index];
+        const startNum = index * batchSize + 1;
+        const endNum = Math.min((index + 1) * batchSize, activeArticlesList.length);
 
-      const res = await fetch("/api/ai/categorize-taxonomy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          articles: activeArticles,
-          model: selectedModel,
-        }),
-      });
+        setBatchProgress({
+          current: index + 1,
+          total: chunks.length,
+          percent: Math.round(((index + 1) / chunks.length) * 100),
+        });
 
-      const contentType = res.headers.get("content-type") || "";
-      const rawResText = await res.text();
+        const batchLogMsg = index === 0
+          ? `📦 ارسال بسته ۱ از ${chunks.length} شامل ${chunk.length} مقاله (مقالات شماره ${startNum} تا ${endNum})...`
+          : `📦 ارسال بسته ${index + 1} از ${chunks.length} شامل ${chunk.length} مقاله (مقالات شماره ${startNum} تا ${endNum}) و ادغام در درخت موجود...`;
 
-      let responseData: any = null;
-      try {
-        responseData = JSON.parse(rawResText);
-      } catch (e) {
-        throw new Error(
-          !res.ok
-            ? `خطای سرور (کد ${res.status})`
-            : "پاسخ سرور شامل ساختار JSON معتبر نبود."
-        );
+        setLoadingStep(batchLogMsg);
+        addLog(batchLogMsg);
+
+        const res = await fetch("/api/ai/categorize-taxonomy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            articles: chunk,
+            existingTaxonomy: currentTaxonomy ? {
+              existingCategoriesTree: currentTaxonomy.existingCategoriesTree,
+              proposedNewCategoriesTree: currentTaxonomy.proposedNewCategoriesTree,
+            } : null,
+            batchIndex: index + 1,
+            totalBatches: chunks.length,
+            model: selectedModel,
+          }),
+        });
+
+        const rawResText = await res.text();
+        let responseData: any = null;
+        try {
+          responseData = JSON.parse(rawResText);
+        } catch (e) {
+          throw new Error(`خطای سرور در بسته ${index + 1} (کد ${res.status}): پاسخ دریافت شده JSON معتبر نبود.`);
+        }
+
+        if (!res.ok) {
+          throw new Error(responseData.error || `خطای سرور در بسته ${index + 1} با کد ${res.status}`);
+        }
+
+        if (responseData.success && responseData.data) {
+          currentTaxonomy = responseData.data;
+          // Live update UI tree
+          setTaxonomy(currentTaxonomy);
+
+          const totalMapped = countArticlesInTree(currentTaxonomy.existingCategoriesTree);
+          const topCatsCount = currentTaxonomy.existingCategoriesTree?.length || 0;
+          addLog(`✅ بسته ${index + 1} با موفقیت پردازش شد. (کل مقالات دسته‌بندی‌شده تاکنون: ${totalMapped} از ${activeArticlesList.length} | تعداد دسته‌های اصلی: ${topCatsCount})`);
+        } else {
+          throw new Error(responseData.error || `پاسخ دریافتی در بسته ${index + 1} شامل داده‌های معتبر نبود.`);
+        }
+
+        // Brief delay for smooth UI feedback
+        if (index < chunks.length - 1 && !isCancelledRef.current) {
+          await new Promise((r) => setTimeout(r, 400));
+        }
       }
 
-      if (!res.ok) {
-        throw new Error(responseData.error || `خطای سرور با کد ${res.status}`);
-      }
-
-      if (responseData.success && responseData.data) {
-        setTaxonomy(responseData.data);
-        setSuccessMsg("تحلیل و استخراج درخت دسته‌بندی ۳ زبانه و اسلاگ‌ها با موفقیت انجام شد.");
-      } else {
-        throw new Error(responseData.error || "پاسخ دریافتی شامل داده‌های معتبر دسته‌بندی نبود.");
+      if (!isCancelledRef.current) {
+        addLog(`🎉 تحلیل بسته‌ای با موفقیت به پایان رسید! تمامی ${activeArticlesList.length} مقاله آنالیز و در درخت دسته‌بندی قرار گرفتند.`);
+        setSuccessMsg(`تحلیل هوشمند بسته‌ای و دسته‌بندی کامل تمامی ${activeArticlesList.length} مقاله با موفقیت انجام شد.`);
       }
     } catch (err: any) {
-      console.error("Taxonomy error:", err);
-      setError(err.message || "خطا در برقراری ارتباط با مدل هوش مصنوعی.");
+      console.error("Batch taxonomy error:", err);
+      const errMsg = err.message || "خطا در برقراری ارتباط با مدل هوش مصنوعی.";
+      setError(errMsg);
+      addLog(`❌ خطا در اجرای پردازش بسته‌ای: ${errMsg}`);
     } finally {
       setLoading(false);
       setLoadingStep("");
+      setBatchProgress(null);
     }
+  };
+
+  const handleCancelBatch = () => {
+    isCancelledRef.current = true;
+    setLoadingStep("درحال متوقف کردن فرآیند بسته‌ای...");
   };
 
   // Map AI category English SLUGs back onto articles category_id
@@ -559,25 +661,47 @@ export default function AICategoryManager({
           </div>
         </div>
 
-        {/* Top Action Trigger */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={handleAnalyzeTaxonomy}
-            disabled={loading}
-            className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-50 text-white font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-[0_0_20px_rgba(6,182,212,0.3)] transition cursor-pointer"
-          >
-            {loading ? (
-              <RefreshCw className="w-4 h-4 animate-spin text-white" />
-            ) : (
-              <Sparkles className="w-4 h-4 text-cyan-200" />
-            )}
-            {taxonomy ? "بازتحلیل و به‌روزرسانی با AI" : "استخراج و تحلیل درخت دسته‌بندی"}
-          </button>
+        {/* Top Action Trigger & Batch Size Controls */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Batch Size Selector */}
+          <div className="flex items-center gap-1.5 bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 text-xs">
+            <Layers className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span className="text-slate-400 font-medium whitespace-nowrap">اندازه بسته:</span>
+            <select
+              value={batchSize}
+              onChange={(e) => setBatchSize(Number(e.target.value))}
+              disabled={loading}
+              className="bg-white/5 border border-white/10 text-cyan-300 font-bold rounded-lg px-2 py-0.5 focus:outline-none focus:border-cyan-500 cursor-pointer disabled:opacity-50 text-xs"
+            >
+              <option value={15} className="bg-slate-900 text-white">۱۵ تایی (خیلی سریع)</option>
+              <option value={20} className="bg-slate-900 text-white">۲۰ تایی (توصیه شده)</option>
+              <option value={30} className="bg-slate-900 text-white">۳۰ تایی (استاندارد)</option>
+              <option value={50} className="bg-slate-900 text-white">۵۰ تایی (بزرگ)</option>
+            </select>
+          </div>
 
-          {taxonomy && (
+          {!loading ? (
+            <button
+              onClick={handleAnalyzeTaxonomy}
+              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 shadow-[0_0_20px_rgba(6,182,212,0.3)] transition cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4 text-cyan-200" />
+              {taxonomy ? "بازتحلیل بسته‌ای با AI" : "شروع تحلیل بسته‌ای (Batching)"}
+            </button>
+          ) : (
+            <button
+              onClick={handleCancelBatch}
+              className="bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 border border-rose-500/40 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <StopCircle className="w-4 h-4 text-rose-400 animate-pulse" />
+              لغو پردازش
+            </button>
+          )}
+
+          {taxonomy && !loading && (
             <button
               onClick={handleApplyCategoriesToArticles}
-              className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+              className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
               title="جایگزین کردن Slug دسته‌بندی روی فیلد category_id مقالات"
             >
               <Zap className="w-3.5 h-3.5 text-emerald-400" />
@@ -587,16 +711,83 @@ export default function AICategoryManager({
         </div>
       </div>
 
-      {/* Loading Progress Overlay / Notice */}
+      {/* Loading Progress Overlay & Progress Bar */}
       {loading && (
-        <div className="my-5 p-4 rounded-xl bg-cyan-950/30 border border-cyan-500/30 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin shrink-0" />
-          <div>
-            <p className="text-sm font-bold text-cyan-300 animate-pulse">{loadingStep}</p>
-            <p className="text-xs text-slate-400 mt-0.5">
-              این عملیات مقالات را آنالیز کرده و برای هر دسته اسلاگ انگلیسی و عناوین به ۳ زبان ساختارمند می‌سازد.
-            </p>
+        <div className="my-5 p-4 rounded-xl bg-cyan-950/40 border border-cyan-500/30 space-y-3 shadow-lg">
+          <div className="flex items-center justify-between text-xs font-bold">
+            <div className="flex items-center gap-2 text-cyan-300">
+              <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
+              <span className="animate-pulse">{loadingStep}</span>
+            </div>
+            {batchProgress && (
+              <span className="font-mono text-cyan-400 bg-cyan-500/20 px-2.5 py-0.5 rounded-full border border-cyan-500/30">
+                بسته {batchProgress.current} از {batchProgress.total} ({batchProgress.percent}٪)
+              </span>
+            )}
           </div>
+
+          {/* Progress Bar */}
+          {batchProgress && (
+            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-white/5 dir-ltr">
+              <div
+                className="h-full bg-gradient-to-r from-cyan-500 to-indigo-500 transition-all duration-300 ease-out"
+                style={{ width: `${batchProgress.percent}%` }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Real-time Terminal Log Viewer Box (بخش لاگ) */}
+      {logs.length > 0 && (
+        <div className="my-4 rounded-xl bg-[#050608] border border-cyan-500/20 overflow-hidden font-mono text-xs">
+          {/* Terminal Header Bar */}
+          <div className="bg-slate-900/90 border-b border-white/10 px-3.5 py-2 flex items-center justify-between text-slate-400">
+            <div className="flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-cyan-400" />
+              <span className="font-bold text-cyan-300 text-[11px]">لاگ‌های زنده پردازش بسته‌ای (Batch Terminal)</span>
+              <span className="text-[10px] bg-cyan-950 text-cyan-400 px-2 py-0.5 rounded border border-cyan-500/30">
+                {logs.length} رویداد
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowLogs(!showLogs)}
+                className="text-[10px] text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded transition cursor-pointer"
+              >
+                {showLogs ? "مخفی‌سازی" : "نمایش لاگ‌ها"}
+              </button>
+              <button
+                onClick={() => setLogs([])}
+                className="text-[10px] text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 px-2 py-0.5 rounded transition cursor-pointer"
+              >
+                پاک‌سازی
+              </button>
+            </div>
+          </div>
+
+          {/* Terminal Output Area */}
+          {showLogs && (
+            <div className="p-3.5 max-h-48 overflow-y-auto space-y-1.5 custom-scrollbar text-[11px] leading-relaxed text-slate-300 dir-ltr text-left selection:bg-cyan-500/30">
+              {logs.map((log, idx) => (
+                <div
+                  key={idx}
+                  className={`font-mono ${
+                    log.includes("❌")
+                      ? "text-rose-400 font-bold"
+                      : log.includes("✅") || log.includes("🎉")
+                      ? "text-emerald-400"
+                      : log.includes("📦")
+                      ? "text-cyan-300"
+                      : "text-slate-300"
+                  }`}
+                >
+                  {log}
+                </div>
+              ))}
+              <div ref={logsEndRef} />
+            </div>
+          )}
         </div>
       )}
 
