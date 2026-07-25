@@ -17,7 +17,7 @@ export default function CSVImporterExporter({ articles, onImport }: CSVImporterE
 
   // Expected CSV Schema Headers in correct order
   const EXPECTED_HEADERS = [
-    "id", "category_id", "is_published", "base_image", "title", "slug", "description", "body",
+    "id", "category_id", "is_published", "base_image", "title", "slug", "description", "long_summary", "body",
     "view_count", "reading_time", "en_title", "en_description", "en_body", "ar_title",
     "ar_description", "ar_body", "deleted_at", "created_at", "updated_at", "tags"
   ];
@@ -75,8 +75,8 @@ export default function CSVImporterExporter({ articles, onImport }: CSVImporterE
 
         const headers = parsedRows[0].map(h => h.trim().toLowerCase());
         
-        // Let's verify mapping headers (excluding optional tags field)
-        const missingHeaders = EXPECTED_HEADERS.filter(eh => eh !== "tags" && !headers.includes(eh));
+        // Let's verify mapping headers (excluding optional tags and long_summary fields)
+        const missingHeaders = EXPECTED_HEADERS.filter(eh => eh !== "tags" && eh !== "long_summary" && !headers.includes(eh));
         if (missingHeaders.length > 0) {
           setError(`ستون‌های اصلی پیدا نشدند: ${missingHeaders.join(", ")}`);
           return;

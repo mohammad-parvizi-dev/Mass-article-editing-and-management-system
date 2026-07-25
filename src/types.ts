@@ -12,6 +12,7 @@ export interface Article {
   title: string;
   slug: string;
   description: string;
+  long_summary?: string;
   body: string;
   view_count: string;
   reading_time: string;

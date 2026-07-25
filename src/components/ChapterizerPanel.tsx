@@ -29,7 +29,7 @@ export default function ChapterizerPanel({
 
   // --- STATE FOR BATCH AI QUEUE ---
   const [safetyDelay, setSafetyDelay] = useState<number>(3); // safety delay in seconds
-  const [batchOp, setBatchOp] = useState<"translate" | "tags" | "slug" | null>(null);
+  const [batchOp, setBatchOp] = useState<"translate" | "tags" | "slug" | "description" | "long_summary" | null>(null);
   
   interface QueueItem {
     id: string;
@@ -68,7 +68,7 @@ export default function ChapterizerPanel({
     batchOpRef.current = batchOp;
   }, [batchOp]);
 
-  const handleInitQueue = (operation: "translate" | "tags" | "slug") => {
+  const handleInitQueue = (operation: "translate" | "tags" | "slug" | "description" | "long_summary") => {
     const activeArticles = articles.filter(art => art.is_published !== "2");
     
     if (activeArticles.length === 0) {
@@ -92,7 +92,7 @@ export default function ChapterizerPanel({
     setTimeout(() => setSuccessMsg(null), 6000);
   };
 
-  const processQueueItemApi = async (articleId: string, op: "translate" | "tags" | "slug"): Promise<Partial<Article>> => {
+  const processQueueItemApi = async (articleId: string, op: "translate" | "tags" | "slug" | "description" | "long_summary"): Promise<Partial<Article>> => {
     const currentArticles = articlesRef.current;
     const article = currentArticles.find(a => a.id === articleId);
     if (!article) throw new Error("مقاله در حافظه یافت نشد.");
@@ -208,6 +208,74 @@ export default function ChapterizerPanel({
 
       return {
         slug: cleaned,
+        isEdited: true,
+        updated_at: new Date().toISOString().replace("T", " ").substring(0, 19)
+      };
+    } else if (op === "description") {
+      const systemInstruction = `You are an expert SEO copywriter and content summarizer. Generate a compelling, high-CTR Persian short description/summary (under 180 characters, around 1-2 sentences) based on the title and body content of the given article. Output ONLY the clean summary text without quotes, backticks, markdown blockquotes, or extra commentary.`;
+
+      const promptText = `عنوان مقاله: ${article.title}
+متن بدنه مقاله: ${article.body || ""}`;
+
+      const res = await fetch("/api/gemini/expand", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: promptText,
+          currentContent: article.description || "",
+          field: "description",
+          model: modelToUse,
+          systemInstruction,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "تراکنش هوش مصنوعی ناموفق بود.");
+
+      let cleaned = data.content ? data.content.trim() : "";
+      if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+        cleaned = cleaned.substring(1, cleaned.length - 1);
+      }
+      if (cleaned.startsWith('`') && cleaned.endsWith('`')) {
+        cleaned = cleaned.replace(/`/g, "");
+      }
+
+      return {
+        description: cleaned.trim(),
+        isEdited: true,
+        updated_at: new Date().toISOString().replace("T", " ").substring(0, 19)
+      };
+    } else if (op === "long_summary") {
+      const systemInstruction = `You are an expert editorial writer, copywriter, and SEO content summarizer. Generate a compelling, comprehensive Persian long summary / introduction (around 3-5 sentences, 150-250 words) based on the title and body content of the given article. This serves as the main article overview/intro. Output ONLY the clean summary text in Persian without quotes, backticks, markdown blockquotes, headers, or extra conversational commentary.`;
+
+      const promptText = `عنوان مقاله: ${article.title}
+متن بدنه مقاله: ${article.body || ""}`;
+
+      const res = await fetch("/api/gemini/expand", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: promptText,
+          currentContent: article.long_summary || "",
+          field: "long_summary",
+          model: modelToUse,
+          systemInstruction,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "تراکنش هوش مصنوعی ناموفق بود.");
+
+      let cleaned = data.content ? data.content.trim() : "";
+      if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+        cleaned = cleaned.substring(1, cleaned.length - 1);
+      }
+      if (cleaned.startsWith('`') && cleaned.endsWith('`')) {
+        cleaned = cleaned.replace(/`/g, "");
+      }
+
+      return {
+        long_summary: cleaned.trim(),
         isEdited: true,
         updated_at: new Date().toISOString().replace("T", " ").substring(0, 19)
       };
@@ -753,7 +821,7 @@ export default function ChapterizerPanel({
             {batchOp === null ? (
               <div className="bg-black/40 border border-dashed border-white/15 p-6 rounded-xl text-center space-y-4">
                 <p className="text-xs text-slate-300 font-medium">لطفاً یکی از فرآیندهای فله‌ای هوش مصنوعی زیر را جهت آماده‌سازی صف درخواست‌های کلی انتخاب کنید:</p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   <button
                     onClick={() => handleInitQueue("translate")}
                     className="flex flex-col items-center justify-center p-4 bg-cyan-950/20 hover:bg-cyan-950/40 border border-cyan-500/20 hover:border-cyan-500/40 rounded-xl transition cursor-pointer group"
@@ -761,6 +829,24 @@ export default function ChapterizerPanel({
                     <Languages className="w-6 h-6 text-cyan-400 mb-2 group-hover:scale-110 transition" />
                     <span className="text-xs font-bold text-cyan-200">مترجم دوزبانه انگلیسی</span>
                     <span className="text-[10px] text-slate-400 mt-1">ترجمه فیلدهای عنوان، چکیده و بدنه HTML کل مقالات</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleInitQueue("description")}
+                    className="flex flex-col items-center justify-center p-4 bg-purple-950/20 hover:bg-purple-950/40 border border-purple-500/20 hover:border-purple-500/40 rounded-xl transition cursor-pointer group"
+                  >
+                    <FileText className="w-6 h-6 text-purple-400 mb-2 group-hover:scale-110 transition" />
+                    <span className="text-xs font-bold text-purple-200">چکیده / توضیحات کوتاه (فارسی)</span>
+                    <span className="text-[10px] text-slate-400 mt-1">خلاصه‌سازی هوشمند و تولید چکیده کوتاه برای کل مقالات</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleInitQueue("long_summary")}
+                    className="flex flex-col items-center justify-center p-4 bg-indigo-950/20 hover:bg-indigo-950/40 border border-indigo-500/20 hover:border-indigo-500/40 rounded-xl transition cursor-pointer group"
+                  >
+                    <Sparkles className="w-6 h-6 text-indigo-400 mb-2 group-hover:scale-110 transition" />
+                    <span className="text-xs font-bold text-indigo-200">خلاصه مفصل / مقدمه مقاله (فارسی)</span>
+                    <span className="text-[10px] text-slate-400 mt-1">تولید مقدمه چند پاراگرافی و خلاصه جامع برای کل مقالات</span>
                   </button>
 
                   <button
@@ -797,6 +883,8 @@ export default function ChapterizerPanel({
                       فرآیند انتخابی فعال: {" "}
                       <span className="text-cyan-400">
                         {batchOp === "translate" && "مترجم دوزبانه انگلیسی"}
+                        {batchOp === "description" && "ساخت چکیده / توضیحات کوتاه (فارسی)"}
+                        {batchOp === "long_summary" && "ساخت خلاصه مفصل / مقدمه مقاله (فارسی)"}
                         {batchOp === "tags" && "تولید کلیدواژه‌های SEO ترکیبی"}
                         {batchOp === "slug" && "تولید اسلاگ (Slug) آدرس صفحات"}
                       </span>

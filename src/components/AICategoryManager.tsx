@@ -59,6 +59,83 @@ export default function AICategoryManager({
   const [copiedJson, setCopiedJson] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
+  // Active articles list
+  const activeArticles = useMemo(
+    () => articles.filter((a) => a.is_published !== "2"),
+    [articles]
+  );
+
+  // Track article IDs assigned to any category in taxonomy tree
+  const mappedArticleIdsSet = useMemo(() => {
+    if (!taxonomy || !taxonomy.existingCategoriesTree) return new Set<string>();
+    const set = new Set<string>();
+    const collect = (nodes: TaxonomyCategory[]) => {
+      nodes.forEach((n) => {
+        if (n.articleIds && Array.isArray(n.articleIds)) {
+          n.articleIds.forEach((id) => set.add(String(id)));
+        }
+        if (n.subcategories && n.subcategories.length > 0) {
+          collect(n.subcategories);
+        }
+      });
+    };
+    collect(taxonomy.existingCategoriesTree);
+    return set;
+  }, [taxonomy]);
+
+  // Find unassigned articles if any
+  const unassignedArticles = useMemo(() => {
+    return activeArticles.filter((a) => !mappedArticleIdsSet.has(String(a.id)));
+  }, [activeArticles, mappedArticleIdsSet]);
+
+  // Auto fix unassigned articles by adding them to a General category
+  const handleFixUnassignedArticles = () => {
+    if (!taxonomy || !taxonomy.existingCategoriesTree || unassignedArticles.length === 0) return;
+
+    const unassignedIds = unassignedArticles.map((a) => String(a.id));
+    const tree = [...taxonomy.existingCategoriesTree];
+
+    let generalNode = tree.find(
+      (cat) =>
+        cat.slug === "general-articles" ||
+        cat.slug === "general" ||
+        (cat.nameFa && cat.nameFa.includes("عمومی"))
+    );
+
+    if (!generalNode) {
+      generalNode = {
+        id: "cat_general_fallback",
+        slug: "general-articles",
+        nameFa: "مطالب و مقالات عمومی",
+        nameEn: "General Articles",
+        nameAr: "المقالات العامة",
+        name: "مطالب و مقالات عمومی",
+        enName: "General Articles",
+        description: "دسته‌بندی جامع شامل مطالب عمومی و مقالات متنوع",
+        articleIds: [],
+        subcategories: [],
+      };
+      tree.push(generalNode);
+    }
+
+    if (!generalNode.articleIds) generalNode.articleIds = [];
+    unassignedIds.forEach((id) => {
+      if (!generalNode!.articleIds.includes(id)) {
+        generalNode!.articleIds.push(id);
+      }
+    });
+
+    const updatedTaxonomy: TaxonomyResult = {
+      ...taxonomy,
+      existingCategoriesTree: tree,
+      totalArticlesAnalyzed: activeArticles.length,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setTaxonomy(updatedTaxonomy);
+    setSuccessMsg(`تعداد ${unassignedIds.length} مقاله باقیمانده با موفقیت به دسته "مطالب و مقالات عمومی" اضافه شدند و پوشش ۱۰۰٪ تکمیل شد.`);
+  };
+
   // Quick copy helper
   const copyText = (text: string, key: string, e?: MouseEvent) => {
     if (e) e.stopPropagation();
@@ -260,7 +337,8 @@ export default function AICategoryManager({
   const renderCategoryNode = (
     node: TaxonomyCategory,
     depth: number = 0,
-    isProposed: boolean = false
+    isProposed: boolean = false,
+    keyPrefix: string = "root"
   ) => {
     const isExpanded = !!expandedNodes[node.id];
     const hasChildren = node.subcategories && node.subcategories.length > 0;
@@ -300,7 +378,7 @@ export default function AICategoryManager({
     const isSelected = selectedCategory?.id === node.id;
 
     return (
-      <div key={node.id} className="relative transition-all duration-150 dir-rtl text-right">
+      <div key={`${isProposed ? "prop" : "ext"}-${node.id || "cat"}-${keyPrefix}`} className="relative transition-all duration-150 dir-rtl text-right">
         {/* Category Item Row */}
         <div
           onClick={() => setSelectedCategory(node)}
@@ -453,7 +531,7 @@ export default function AICategoryManager({
         {/* Subcategories Children Recursive list */}
         {hasChildren && isExpanded && (
           <div className="border-r-2 border-cyan-500/20 mr-4 pr-1 space-y-1">
-            {node.subcategories!.map((child) => renderCategoryNode(child, depth + 1, isProposed))}
+            {node.subcategories!.map((child, idx) => renderCategoryNode(child, depth + 1, isProposed, `${keyPrefix}-${idx}`))}
           </div>
         )}
       </div>
@@ -542,17 +620,58 @@ export default function AICategoryManager({
         <div className="mt-6 space-y-6">
           {/* AI Insights Summary Card */}
           <div className="p-4 rounded-xl bg-gradient-to-r from-cyan-950/40 to-blue-950/20 border border-cyan-500/20 text-xs text-slate-300 space-y-1">
-            <div className="flex items-center gap-2 text-cyan-400 font-bold text-sm">
-              <Sparkles className="w-4 h-4" />
-              {taxonomy.title || "خلاصه تحلیل هوش مصنوعی"}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-cyan-400 font-bold text-sm">
+                <Sparkles className="w-4 h-4" />
+                {taxonomy.title || "خلاصه تحلیل هوش مصنوعی"}
+              </div>
+              <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold font-mono ${
+                unassignedArticles.length === 0
+                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                  : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+              }`}>
+                {unassignedArticles.length === 0 ? "پوشش ۱۰۰٪ کامل مقالات" : `نیاز به تکمیل ${unassignedArticles.length} مقاله`}
+              </span>
             </div>
             <p className="text-slate-300 leading-relaxed">{taxonomy.summary}</p>
-            <div className="pt-2 flex items-center gap-4 text-[11px] text-slate-400 font-mono">
-              <span>تعداد مقالات آنالیز شده: {taxonomy.totalArticlesAnalyzed || articles.length}</span>
+            <div className="pt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400 font-mono">
+              <span>کل مقالات فعال: {activeArticles.length}</span>
+              <span>•</span>
+              <span className={unassignedArticles.length === 0 ? "text-emerald-400 font-semibold" : "text-amber-400 font-semibold"}>
+                مقالات در دسته‌ها: {activeArticles.length - unassignedArticles.length} از {activeArticles.length} (
+                {activeArticles.length > 0
+                  ? Math.round(((activeArticles.length - unassignedArticles.length) / activeArticles.length) * 100)
+                  : 0}
+                ٪)
+              </span>
               <span>•</span>
               <span>تاریخ بروزرسانی: {new Date(taxonomy.updatedAt).toLocaleTimeString("fa-IR")}</span>
             </div>
           </div>
+
+          {/* Unassigned Articles Notice & Auto Fixer */}
+          {unassignedArticles.length > 0 && (
+            <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg animate-pulse">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4.5 h-4.5 text-amber-400 shrink-0" />
+                <div>
+                  <p className="font-bold text-amber-300">
+                    تعداد {unassignedArticles.length} مقاله در نقشه فعلی هوش مصنوعی جا مانده‌اند!
+                  </p>
+                  <p className="text-[11px] text-slate-300 mt-0.5">
+                    جهت اطمینان از قرارگیری همه مقالات در سیستم، می‌توانید با یک کلیک آنها را به دسته جامع "مطالب و مقالات عمومی" منتقل کنید.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleFixUnassignedArticles}
+                className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 px-3.5 py-2 rounded-lg font-bold transition cursor-pointer text-xs shrink-0 flex items-center gap-1.5"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                تکمیل پوشش ۱۰۰٪ (افزودن {unassignedArticles.length} مقاله)
+              </button>
+            </div>
+          )}
 
           {/* Navigation Tabs & Search Controls */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-b border-white/10 pb-3">
@@ -639,8 +758,8 @@ export default function AICategoryManager({
               {/* Tree View (Column 7/12) */}
               <div className="lg:col-span-7 space-y-1 max-h-[580px] overflow-y-auto pr-1 custom-scrollbar">
                 {taxonomy.existingCategoriesTree && taxonomy.existingCategoriesTree.length > 0 ? (
-                  taxonomy.existingCategoriesTree.map((catNode) =>
-                    renderCategoryNode(catNode, 0, false)
+                  taxonomy.existingCategoriesTree.map((catNode, idx) =>
+                    renderCategoryNode(catNode, 0, false, `ext-${idx}`)
                   )
                 ) : (
                   <p className="text-xs text-slate-500 text-center py-8">
@@ -793,12 +912,12 @@ export default function AICategoryManager({
 
                       {selectedCategory.articleIds && selectedCategory.articleIds.length > 0 ? (
                         <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                          {selectedCategory.articleIds.map((artId) => {
+                          {selectedCategory.articleIds.map((artId, idx) => {
                             const article = articleMap.get(artId);
                             if (!article) return null;
                             return (
                               <div
-                                key={artId}
+                                key={`side-art-${artId}-${idx}`}
                                 className="p-2.5 bg-white/5 hover:bg-white/10 rounded-lg border border-white/5 text-xs text-slate-200 transition"
                               >
                                 <p className="font-semibold text-cyan-300 line-clamp-1">
@@ -844,8 +963,8 @@ export default function AICategoryManager({
               <div className="space-y-1 max-h-[500px] overflow-y-auto pr-1">
                 {taxonomy.proposedNewCategoriesTree &&
                 taxonomy.proposedNewCategoriesTree.length > 0 ? (
-                  taxonomy.proposedNewCategoriesTree.map((propNode) =>
-                    renderCategoryNode(propNode, 0, true)
+                  taxonomy.proposedNewCategoriesTree.map((propNode, idx) =>
+                    renderCategoryNode(propNode, 0, true, `prop-${idx}`)
                   )
                 ) : (
                   <p className="text-xs text-slate-500 text-center py-8">

@@ -439,28 +439,42 @@ app.post("/api/ai/categorize-taxonomy", async (req, res) => {
       category_id: a.category_id || "",
     }));
 
-    const systemInstruction = `You are a world-class AI content taxonomist and metadata strategist.
-Your task is to analyze the provided articles and produce a multi-level hierarchical category tree (taxonomy) with trilingual titles (Persian, English, Arabic) and a clean English URL slug for every category and subcategory, along with a set of proposed NEW categories for future content expansion.
+    const systemInstruction = `You are an expert AI content taxonomist, SEO architect, and enterprise CMS metadata strategist.
+Your task is to analyze the provided set of articles and produce a clean, professional, highly intuitive multi-level category tree (taxonomy) with trilingual titles (Persian, English, Arabic) and URL-friendly English slugs.
 
-Strict Rules:
-1. Every category object MUST include:
-   - "slug": lower-case URL-friendly English slug (e.g. "artificial-intelligence", "seo-optimization", "web-development")
-   - "nameFa": Title in Persian (Farsi)
+CRITICAL MANDATORY RULES FOR TAXONOMY & CLASSIFICATION:
+1. DEEP ANALYSIS & LOGICAL TAXONOMY STRUCTURE:
+   - First, analyze all provided article titles, descriptions, and tags as a unified content corpus to identify clear macro-topics (e.g. Web Development, SEO & Content Strategy, Artificial Intelligence, Digital Marketing, Business & Management, Design & UI/UX, etc.).
+   - Create broad, professional, well-structured CMS top-level categories and logical subcategories.
+   - Avoid creating overly narrow, fragmented, or redundant categories. Keep top-level categories logical and comprehensive.
+
+2. UNIQUE PRIMARY CLASSIFICATION (STRICT 1:1 ARTICLE ASSIGNMENT):
+   - EVERY ARTICLE ID MUST BE ASSIGNED TO EXACTLY ONE SINGLE CATEGORY OR SUBCATEGORY NODE IN "existingCategoriesTree".
+   - DO NOT REPEAT ANY ARTICLE ID ACROSS MULTIPLE CATEGORIES OR SUBCATEGORIES.
+   - IF AN ARTICLE BELONGS TO A SUBCATEGORY, PLACE ITS ID ONLY IN THAT SUBCATEGORY'S "articleIds" ARRAY, NOT IN THE PARENT CATEGORY'S ARRAY.
+   - THE SUM OF ALL ARTICLE COUNTS ACROSS ALL CATEGORY NODES MUST EQUAL 100% OF THE INPUT ARTICLES WITHOUT ANY DUPLICATION.
+
+3. REQUIRED JSON FIELD FORMATS:
+   - "slug": lower-case URL-friendly English slug (e.g. "digital-marketing", "seo-strategy", "web-development")
+   - "nameFa": Professional title in Persian (Farsi)
    - "nameEn": Title in English
    - "nameAr": Title in Arabic
-   - "name": Duplicate of "nameFa" for backward compatibility
-   - "enName": Duplicate of "nameEn" for backward compatibility
-2. "existingCategoriesTree": Hierarchical categories and multi-level subcategories (Level 1, Level 2, etc.) derived directly from analyzing the articles.
-   - Map every article's ID to the most specific subcategory or category it belongs to in "articleIds": ["id1", "id2"]. Every article provided MUST be mapped.
-3. "proposedNewCategoriesTree": Multi-level new proposed categories (with empty "articleIds": []) that do NOT have current articles but are highly relevant for content expansion. Include a "suggestedReason" in Persian for each proposed category.
-4. "summary": A brief analytical overview (2-3 sentences in Persian) summarizing the topic clusters found and strategic content recommendations.
+   - "name": Duplicate of "nameFa"
+   - "enName": Duplicate of "nameEn"
+   - "description": Clear 1-sentence description in Persian of what content this category holds.
 
-Output MUST be purely valid JSON without any markdown code fence wrappers (\`\`\`json) or conversational text.
+4. REQUIRED OUTPUT OBJECT STRUCTURE:
+   - "title": "درخت تحلیل و دسته‌بندی جامع و تخصصی مقالات"
+   - "summary": A brief strategic overview (2-3 sentences in Persian) summarizing the core topic clusters discovered across the corpus and taxonomy structure.
+   - "existingCategoriesTree": Array of top-level category objects (with subcategories and articleIds).
+   - "proposedNewCategoriesTree": Array of newly suggested categories (with empty "articleIds": []) for future content expansion, including a "suggestedReason" in Persian for each.
 
-Required JSON Structure:
+Output MUST be purely valid JSON without markdown code fences or conversational boilerplate.
+
+Example JSON Structure:
 {
-  "title": "درخت تحلیل و دسته‌بندی هوشمند مقالات",
-  "summary": "تحلیل خلاصه هوش مصنوعی از ساختار مقالات...",
+  "title": "درخت تحلیل و دسته‌بندی جامع و تخصصی مقالات",
+  "summary": "تحلیل هوش مصنوعی نشان می‌دهد که مقالات در ۵ خوشه اصلی شامل دیجیتال مارکتینگ، هوش مصنوعی، توسعه وب، مدیریت و طراحی قرار گرفته‌اند...",
   "existingCategoriesTree": [
     {
       "id": "cat_1",
@@ -470,8 +484,8 @@ Required JSON Structure:
       "nameAr": "التسويق الرقمي",
       "name": "بازاریابی دیجیتال",
       "enName": "Digital Marketing",
-      "description": "توضیح کوتاه دسته",
-      "articleIds": ["1", "2"],
+      "description": "دسته‌بندی جامع استراتژی‌های بازاریابی دیجیتال و تبلیغات آنلاین",
+      "articleIds": [],
       "subcategories": [
         {
           "id": "sub_1_1",
@@ -481,8 +495,8 @@ Required JSON Structure:
           "nameAr": "سيو واستراتيجية المحتوى",
           "name": "سئو و استراتژی محتوا",
           "enName": "SEO & Content Strategy",
-          "description": "توضیح زیردسته",
-          "articleIds": ["3"],
+          "description": "بهینه‌سازی موتورهای جستجو و تولید محتوای ارزشمند",
+          "articleIds": ["1", "2", "3"],
           "subcategories": []
         }
       ]
@@ -491,23 +505,29 @@ Required JSON Structure:
   "proposedNewCategoriesTree": [
     {
       "id": "prop_1",
-      "slug": "ai-automation-agents",
-      "nameFa": "اتوماسیون و ایجنت‌های هوش مصنوعی",
-      "nameEn": "AI Automation & Agents",
-      "nameAr": "الأتمتة ووكلاء الذكاء الاصطناعي",
-      "name": "اتوماسیون و ایجنت‌های هوش مصنوعی",
-      "enName": "AI Automation & Agents",
-      "description": "توضیح دسته",
-      "suggestedReason": "علت پیشنهاد هوش مصنوعی جهت توسعه محتوای آتی...",
+      "slug": "ai-agents-automation",
+      "nameFa": "ایجنت‌ها و اتوماسیون هوش مصنوعی",
+      "nameEn": "AI Agents & Automation",
+      "nameAr": "وکلاء الذکاء الاصطناعي والأتمتة",
+      "name": "ایجنت‌ها و اتوماسیون هوش مصنوعی",
+      "enName": "AI Agents & Automation",
+      "description": "استفاده از ایجنت‌های هوشمند برای خودکارسازی فرآیندها",
+      "suggestedReason": "با توجه به رشد روزافزون ابزارهای ایجنت‌محور، ساخت این دسته برای مقالات آینده توصیه می‌شود.",
       "articleIds": [],
       "subcategories": []
     }
   ]
 }`;
 
-    const prompt = `لطفاً مقالات زیر را به صورت کامل آنالیز کرده و درخت دسته‌بندی چندسطحی (دسته‌های اصلی و زیردسته‌ها) همراه با پیشنهادهای جدید را استخراج نمایید:
+    const allArticleIdsList = simplifiedArticles.map((a: any) => String(a.id));
+    const prompt = `شما باید تمام ${simplifiedArticles.length} مقاله زیر را بر اساس عنوان، توضیحات و کلیدواژه‌ها تحلیل کرده و در یک درخت دسته‌بندی استاندارد و حرفه‌ای قرار دهید.
 
-مقالات (${simplifiedArticles.length} عدد):
+قانون کلیدی و غیرقابل تغییر: هر مقاله باید دقیقاً و فقط در ۱ دسته یا زیردسته قرار گیرد (بدون هیچ تکراری در دسته‌های دیگر).
+
+لیست کامل شناسه (${simplifiedArticles.length} مقاله):
+[${allArticleIdsList.join(", ")}]
+
+اطلاعات کامل مقالات جهت تحلیل موضوعی:
 ${JSON.stringify(simplifiedArticles, null, 2)}`;
 
     console.log(`[Categorize Taxonomy] Analyzing ${simplifiedArticles.length} articles with model ${model || "default"}...`);
@@ -528,11 +548,80 @@ ${JSON.stringify(simplifiedArticles, null, 2)}`;
     }
 
     // Ensure fallback arrays exist if model omitted them
-    if (!taxonomyData.existingCategoriesTree) {
+    if (!taxonomyData.existingCategoriesTree || !Array.isArray(taxonomyData.existingCategoriesTree)) {
       taxonomyData.existingCategoriesTree = [];
     }
-    if (!taxonomyData.proposedNewCategoriesTree) {
+    if (!taxonomyData.proposedNewCategoriesTree || !Array.isArray(taxonomyData.proposedNewCategoriesTree)) {
       taxonomyData.proposedNewCategoriesTree = [];
+    }
+
+    // SERVER-SIDE STRICT DEDUPLICATION & 100% COVERAGE GUARANTEE:
+    // Ensure every article ID appears in at most 1 category/subcategory node across the entire tree.
+    const globalAssignedIds = new Set<string>();
+
+    const cleanTreeNodes = (nodes: any[]) => {
+      if (!Array.isArray(nodes)) return;
+      for (const node of nodes) {
+        if (Array.isArray(node.articleIds)) {
+          // Filter articleIds to keep only those not previously assigned
+          node.articleIds = node.articleIds
+            .map((id: any) => String(id))
+            .filter((id: string) => {
+              if (globalAssignedIds.has(id)) {
+                return false; // Already assigned to another category, remove duplicate!
+              }
+              globalAssignedIds.add(id);
+              return true;
+            });
+        } else {
+          node.articleIds = [];
+        }
+
+        if (Array.isArray(node.subcategories) && node.subcategories.length > 0) {
+          cleanTreeNodes(node.subcategories);
+        }
+      }
+    };
+
+    cleanTreeNodes(taxonomyData.existingCategoriesTree);
+
+    // Find any unmapped article IDs
+    const unmappedIds = allArticleIdsList.filter((id: string) => !globalAssignedIds.has(id));
+
+    if (unmappedIds.length > 0) {
+      console.log(`[Categorize Taxonomy] Notice: ${unmappedIds.length} articles unassigned by AI. Auto-assigning to General category...`);
+
+      let generalCat = taxonomyData.existingCategoriesTree.find((cat: any) =>
+        cat.slug === "general-articles" ||
+        cat.slug === "general" ||
+        (cat.nameFa && cat.nameFa.includes("عمومی"))
+      );
+
+      if (!generalCat) {
+        generalCat = {
+          id: "cat_general_fallback",
+          slug: "general-articles",
+          nameFa: "مطالب و مقالات عمومی",
+          nameEn: "General Articles",
+          nameAr: "المقالات العامة",
+          name: "مطالب و مقالات عمومی",
+          enName: "General Articles",
+          description: "دسته‌بندی جامع شامل مطالب عمومی و مقالات متنوع",
+          articleIds: [],
+          subcategories: [],
+        };
+        taxonomyData.existingCategoriesTree.push(generalCat);
+      }
+
+      if (!Array.isArray(generalCat.articleIds)) {
+        generalCat.articleIds = [];
+      }
+
+      unmappedIds.forEach((id: string) => {
+        if (!generalCat.articleIds.includes(id)) {
+          generalCat.articleIds.push(id);
+        }
+      });
     }
 
     res.json({

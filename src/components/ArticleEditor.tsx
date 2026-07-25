@@ -209,7 +209,7 @@ export default function ArticleEditor({
   const [fieldAiLoading, setFieldAiLoading] = useState<Record<string, boolean>>({});
 
   const handleFieldGenerateAI = async (
-    fieldTarget: "title" | "description" | "en_title" | "en_description" | "slug" | "tags",
+    fieldTarget: "title" | "description" | "long_summary" | "en_title" | "en_description" | "slug" | "tags",
     instruction: string,
     contextContent: string
   ) => {
@@ -584,6 +584,35 @@ export default function ArticleEditor({
                   placeholder="چکیده کوتاه مقاله جهت نمایش در نتایج موتورهای جستجو..."
                   className="w-full text-xs bg-black/60 text-white border border-white/20 rounded-lg p-2.5 focus:outline-hidden focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 leading-relaxed font-sans placeholder:text-slate-400"
                   rows={2}
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-extrabold text-[#f1f5f9] flex items-center gap-1.5 justify-start">
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400 select-none"></span>
+                    خلاصه مفصل / مقدمه مقاله (فارسی)
+                  </label>
+                  <button
+                    type="button"
+                    disabled={fieldAiLoading["long_summary"] || (!formState.title && !formState.body)}
+                    onClick={() => handleFieldGenerateAI("long_summary", "با استفاده از عنوان و متن بدنه زیر، یک خلاصه مفصل و مقدمه جامع (حدود ۳ تا ۵ جمله، در حدود ۱۵۰ الی ۲۵۰ کلمه) به زبان فارسی که به عنوان مقدمه اصلی و خلاصه طولانی مقاله عمل کند تولید کن. خروجی فقط و فقط شامل خلاصه مفصل نهایی باشد بدون کلمه اضافه.", (formState.title || "") + "\n" + (formState.body || ""))}
+                    className="text-[10px] bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 hover:text-purple-200 border border-purple-500/25 px-2 py-1 rounded flex items-center gap-1 transition cursor-pointer disabled:opacity-40 font-bold"
+                  >
+                    {fieldAiLoading["long_summary"] ? (
+                      <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-2.5 h-2.5 text-purple-400" />
+                    )}
+                    تولید مقدمه/خلاصه مفصل با AI
+                  </button>
+                </div>
+                <textarea
+                  value={formState.long_summary || ""}
+                  onChange={(e) => handleChange("long_summary", e.target.value)}
+                  placeholder="مقدمه جامع و خلاصه مفصل مقاله جهت استفاده در ابتدای نوشته یا بخش خلاصه‌سازی..."
+                  className="w-full text-xs bg-black/60 text-white border border-white/20 rounded-lg p-2.5 focus:outline-hidden focus:border-purple-400 focus:ring-1 focus:ring-purple-400 leading-relaxed font-sans placeholder:text-slate-400"
+                  rows={3}
                 />
               </div>
 
