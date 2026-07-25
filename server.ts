@@ -433,7 +433,7 @@ app.post("/api/ai/categorize-taxonomy", async (req, res) => {
     const simplifiedArticles = articles.map((a: any) => ({
       id: String(a.id),
       title: a.title || "",
-      description: a.description ? String(a.description).substring(0, 250) : "",
+      description: a.description ? String(a.description).substring(0, 200) : "",
       keywords: a.keywords || "",
       tags: a.tags || "",
       category_id: a.category_id || "",
@@ -442,20 +442,25 @@ app.post("/api/ai/categorize-taxonomy", async (req, res) => {
     const systemInstruction = `You are an expert AI content taxonomist, SEO architect, and enterprise CMS metadata strategist.
 Your task is to analyze the provided batch of articles and produce/update a clean, professional multi-level category tree (taxonomy) with trilingual titles (Persian, English, Arabic) and URL-friendly English slugs.
 
-CRITICAL MANDATORY RULES FOR TAXONOMY & CLASSIFICATION:
-1. DYNAMIC TAXONOMY OPTIMIZATION, MERGING & EDITING AUTHORITY:
-   - When an existing taxonomy tree ("existingCategoriesTree") is provided, you have FULL AUTHORITY to refine, edit, rename, or merge existing categories and subcategories if the new articles reveal a cleaner macro-structure.
-   - You MAY move previously categorized articles into new or different subcategories if the new structure offers a better, more specific fit.
-   - You MUST CONSOLIDATE duplicate or overlapping categories (e.g., merge redundant topics into a single parent/subcategory node).
-   - ALL previously categorized article IDs MUST remain present in the updated tree. DO NOT lose or drop any article IDs from previous batches.
+CRITICAL MANDATORY RULES FOR TAXONOMY & SUBCATEGORIES:
+1. MULTI-LEVEL HIERARCHY IS STRICTLY REQUIRED (PARENTS & SUBCATEGORIES):
+   - YOU MUST CREATE A MULTI-LEVEL HIERARCHICAL TAXONOMY. Do NOT place all articles directly inside top-level parent categories.
+   - Every main top-level category (e.g., "بازاریابی دیجیتال" / "Digital Marketing") MUST be broken down into specialized subcategories inside its "subcategories" array (e.g. "سئو و استراتژی محتوا", "بازاریابی شبکه‌های اجتماعی", "تبلیغات و برندسازی").
+   - Assign articles directly to their SPECIFIC SUBCATEGORY ("articleIds" array inside the subcategory node).
+   - Only place an article in a top-level category if no applicable subcategory exists or can be created for it.
 
-2. UNIQUE PRIMARY CLASSIFICATION (STRICT 1:1 ARTICLE ASSIGNMENT):
+2. DYNAMIC TAXONOMY OPTIMIZATION, MERGING & EDITING:
+   - When an existing taxonomy tree ("existingCategoriesTree") is provided, you have FULL AUTHORITY to refine, edit, rename, or merge existing categories and subcategories if the new articles reveal a cleaner macro-structure.
+   - You MUST CONSOLIDATE duplicate or overlapping categories into unified subcategories.
+   - You MAY move previously categorized articles into new or refined subcategories if it improves logical organization.
+   - ALL previously categorized article IDs MUST remain present in the updated tree. DO NOT drop any article IDs.
+
+3. UNIQUE PRIMARY CLASSIFICATION (STRICT 1:1 ARTICLE ASSIGNMENT):
    - EVERY ARTICLE ID across all processed batches MUST BE ASSIGNED TO EXACTLY ONE SINGLE CATEGORY OR SUBCATEGORY NODE IN "existingCategoriesTree".
    - DO NOT REPEAT ANY ARTICLE ID ACROSS MULTIPLE CATEGORIES OR SUBCATEGORIES.
-   - IF AN ARTICLE BELONGS TO A SUBCATEGORY, PLACE ITS ID ONLY IN THAT SUBCATEGORY'S "articleIds" ARRAY, NOT IN THE PARENT CATEGORY'S ARRAY.
 
-3. REQUIRED JSON FIELD FORMATS:
-   - "slug": lower-case URL-friendly English slug (e.g. "digital-marketing", "seo-strategy", "web-development")
+4. REQUIRED JSON FIELD FORMATS:
+   - "slug": lower-case URL-friendly English slug (e.g. "digital-marketing", "seo-content-strategy", "web-development")
    - "nameFa": Professional title in Persian (Farsi)
    - "nameEn": Title in English
    - "nameAr": Title in Arabic
@@ -463,11 +468,11 @@ CRITICAL MANDATORY RULES FOR TAXONOMY & CLASSIFICATION:
    - "enName": Duplicate of "nameEn"
    - "description": Clear 1-sentence description in Persian of what content this category holds.
 
-4. REQUIRED OUTPUT OBJECT STRUCTURE:
+5. REQUIRED OUTPUT OBJECT STRUCTURE:
    - "title": "درخت تحلیل و دسته‌بندی جامع و تخصصی مقالات"
    - "summary": A brief strategic overview (2-3 sentences in Persian) summarizing the core topic clusters discovered across the corpus and taxonomy structure.
-   - "existingCategoriesTree": Array of top-level category objects (with subcategories and articleIds).
-   - "proposedNewCategoriesTree": Array of newly suggested categories (with empty "articleIds": []) for future content expansion, including a "suggestedReason" in Persian for each.
+   - "existingCategoriesTree": Array of top-level category objects (each with "subcategories" array and "articleIds" array).
+   - "proposedNewCategoriesTree": Array of newly suggested categories for future expansion.
 
 Output MUST be purely valid JSON without markdown code fences or conversational boilerplate.`;
 
@@ -475,16 +480,33 @@ Output MUST be purely valid JSON without markdown code fences or conversational 
     
     let prompt = "";
     if (existingTaxonomy && Array.isArray(existingTaxonomy.existingCategoriesTree) && existingTaxonomy.existingCategoriesTree.length > 0) {
-      prompt = `درخت دسته‌بندی فعلی حاصل از تحلیل بسته‌های قبلی به شرح زیر است:
-${JSON.stringify(existingTaxonomy.existingCategoriesTree, null, 2)}
+      // Create a clean lightweight representation of existing taxonomy tree to avoid huge prompt sizes
+      const summarizeTree = (nodes: any[]): any[] => {
+        return nodes.map((n: any) => ({
+          id: n.id,
+          slug: n.slug,
+          nameFa: n.nameFa || n.name,
+          nameEn: n.nameEn || n.enName,
+          description: n.description,
+          assignedCount: Array.isArray(n.articleIds) ? n.articleIds.length : 0,
+          subcategories: Array.isArray(n.subcategories) ? summarizeTree(n.subcategories) : [],
+          // Include existing articleIds so AI knows previous assignments
+          articleIds: Array.isArray(n.articleIds) ? n.articleIds : [],
+        }));
+      };
+
+      const compactTree = summarizeTree(existingTaxonomy.existingCategoriesTree);
+
+      prompt = `درخت دسته‌بندی فعلی به همراه شناسه مقالات بسته‌های قبلی به شرح زیر است:
+${JSON.stringify(compactTree, null, 2)}
 
 اکنون بسته شماره ${batchIndex || 1} از ${totalBatches || 1} شامل ${simplifiedArticles.length} مقاله جدید زیر ارائه می‌شود.
 
-دستورالعمل مهم بازبینی و جانمایی:
-۱. مقالات جدید این بسته را در دسته‌های موجود جانمایی کنید یا در صورت نیاز دسته‌ها/زیردسته‌های جدید بسازید.
-۲. شما اجازه کامل دارید که دسته‌بندی‌های موجود را ویرایش، اصلاح یا ادغام نمایید تا از ایجاد دسته‌های تکراری و موازی جلوگیری شود.
-۳. در صورت نیاز می‌توانید مقالات بسته‌های قبلی را نیز به زیردسته‌های جدیدتر و تخصصی‌تر منتقل کنید تا درخت نهایی کاملاً منطقی، یکدست و بدون تکرار باشد.
-۴. تمامی شناسه‌های مقالات بسته‌های قبلی همراه با مقالات این بسته باید در درخت نهایی حفظ شوند.
+دستورالعمل مهم بازبینی و زیرشاخه‌سازی:
+۱. مقالات جدید این بسته را ترجیحاً در زیردسته‌های تخصصی (subcategories) موجود یا جدید جانمایی کنید.
+۲. حتماً دسته‌های اصلی را خرد کرده و زیردسته‌های دقیق بسازید (از قرار دادن همه مقالات در دسته اصلی پرهیز کنید).
+۳. شما اجازه ادغام یا اصلاح دسته‌های تکراری را دارید.
+۴. تمامی شناسه‌های مقالات قبلی + مقالات این بسته جدید باید در خروجی نهایی حفظ شوند.
 
 شناسه‌های مقالات جدید در این بسته:
 [${allArticleIdsList.join(", ")}]
@@ -492,7 +514,9 @@ ${JSON.stringify(existingTaxonomy.existingCategoriesTree, null, 2)}
 اطلاعات مقالات جدید این بسته:
 ${JSON.stringify(simplifiedArticles, null, 2)}`;
     } else {
-      prompt = `شما باید تمام ${simplifiedArticles.length} مقاله زیر در بسته اولیه را بر اساس عنوان، توضیحات و کلیدواژه‌ها تحلیل کرده و ساختار درخت دسته‌بندی ۳ زبانه همراه با اسلاگ بسازید.
+      prompt = `شما باید تمام ${simplifiedArticles.length} مقاله زیر در بسته اولیه را بر اساس عنوان، توضیحات و کلیدواژه‌ها تحلیل کرده و ساختار درخت دسته‌بندی چندسطحی (دسته‌های اصلی + زیردسته‌ها) ۳ زبانه همراه با اسلاگ بسازید.
+
+نکته بسیار مهم: حتماً دسته‌های اصلی را به زیردسته‌های تخصصی (subcategories) تقسیم کرده و مقالات را در زیردسته‌ها قرار دهید.
 
 شناسه‌های مقالات این بسته اولیه:
 [${allArticleIdsList.join(", ")}]

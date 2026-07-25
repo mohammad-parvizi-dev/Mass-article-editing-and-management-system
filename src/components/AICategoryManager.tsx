@@ -233,34 +233,37 @@ export default function AICategoryManager({
     setExpandedNodes(allExpanded);
   };
 
+  // Unanalyzed active articles (active articles not yet mapped in current taxonomy tree)
+  const unanalyzedArticles = useMemo(() => {
+    if (!articles) return [];
+    const active = articles.filter((a) => a.is_published !== "2");
+    return active.filter((a) => !mappedArticleIdsSet.has(String(a.id)));
+  }, [articles, mappedArticleIdsSet]);
+
   const handleCollapseAll = () => {
     setExpandedNodes({});
   };
 
-  // Run AI Incremental Batch Taxonomy Analysis
-  const handleAnalyzeTaxonomy = async () => {
-    if (!articles || articles.length === 0) {
+  // Run AI Incremental Batch Taxonomy Analysis with Retry & Resume capability
+  const runBatchProcessing = async (targetArticles: Article[], initialTaxonomy: TaxonomyResult | null, isResume: boolean = false) => {
+    if (!targetArticles || targetArticles.length === 0) {
       setError("هیچ مقاله‌ای برای تحلیل وجود ندارد.");
-      return;
-    }
-
-    const activeArticlesList = articles.filter((a) => a.is_published !== "2");
-    if (activeArticlesList.length === 0) {
-      setError("هیچ مقاله فعالی برای تحلیل یافت نشد.");
       return;
     }
 
     setLoading(true);
     setError(null);
     setSuccessMsg(null);
-    setLogs([]);
+    if (!isResume) {
+      setLogs([]);
+    }
     setShowLogs(true);
     isCancelledRef.current = false;
 
-    // Split active articles into batches of size `batchSize`
+    // Split target articles into batches of size `batchSize`
     const chunks: Article[][] = [];
-    for (let i = 0; i < activeArticlesList.length; i += batchSize) {
-      chunks.push(activeArticlesList.slice(i, i + batchSize));
+    for (let i = 0; i < targetArticles.length; i += batchSize) {
+      chunks.push(targetArticles.slice(i, i + batchSize));
     }
 
     const addLog = (msg: string) => {
@@ -268,10 +271,14 @@ export default function AICategoryManager({
       setLogs((prev) => [...prev, `[${timeStr}] ${msg}`]);
     };
 
-    addLog(`🚀 شروع تحلیل هوشمند دسته‌بندی با مدل انتخاب شده: ${selectedModel}`);
-    addLog(`📊 تعداد کل مقالات: ${activeArticlesList.length} مقاله | اندازه هر بسته: ${batchSize} تایی | تعداد بسته‌ها: ${chunks.length}`);
+    if (isResume) {
+      addLog(`🔄 ادامه تحلیل بسته‌ای برای ${targetArticles.length} مقاله باقی‌مانده...`);
+    } else {
+      addLog(`🚀 شروع تحلیل هوشمند دسته‌بندی با مدل انتخاب شده: ${selectedModel}`);
+    }
+    addLog(`📊 تعداد مقالات ورودی: ${targetArticles.length} مقاله | اندازه هر بسته: ${batchSize} تایی | تعداد بسته‌ها: ${chunks.length}`);
 
-    let currentTaxonomy: TaxonomyResult | null = null;
+    let currentTaxonomy: TaxonomyResult | null = initialTaxonomy;
 
     try {
       for (let index = 0; index < chunks.length; index++) {
@@ -283,7 +290,7 @@ export default function AICategoryManager({
 
         const chunk = chunks[index];
         const startNum = index * batchSize + 1;
-        const endNum = Math.min((index + 1) * batchSize, activeArticlesList.length);
+        const endNum = Math.min((index + 1) * batchSize, targetArticles.length);
 
         setBatchProgress({
           current: index + 1,
@@ -291,72 +298,115 @@ export default function AICategoryManager({
           percent: Math.round(((index + 1) / chunks.length) * 100),
         });
 
-        const batchLogMsg = index === 0
-          ? `📦 ارسال بسته ۱ از ${chunks.length} شامل ${chunk.length} مقاله (مقالات شماره ${startNum} تا ${endNum})...`
-          : `📦 ارسال بسته ${index + 1} از ${chunks.length} شامل ${chunk.length} مقاله (مقالات شماره ${startNum} تا ${endNum}) و ادغام در درخت موجود...`;
-
+        const batchLogMsg = `📦 ارسال بسته ${index + 1} از ${chunks.length} شامل ${chunk.length} مقاله (شماره ${startNum} تا ${endNum})...`;
         setLoadingStep(batchLogMsg);
         addLog(batchLogMsg);
 
-        const res = await fetch("/api/ai/categorize-taxonomy", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            articles: chunk,
-            existingTaxonomy: currentTaxonomy ? {
-              existingCategoriesTree: currentTaxonomy.existingCategoriesTree,
-              proposedNewCategoriesTree: currentTaxonomy.proposedNewCategoriesTree,
-            } : null,
-            batchIndex: index + 1,
-            totalBatches: chunks.length,
-            model: selectedModel,
-          }),
-        });
-
-        const rawResText = await res.text();
+        // Retry Loop per batch (up to 3 attempts with 2s delay)
         let responseData: any = null;
-        try {
-          responseData = JSON.parse(rawResText);
-        } catch (e) {
-          throw new Error(`خطای سرور در بسته ${index + 1} (کد ${res.status}): پاسخ دریافت شده JSON معتبر نبود.`);
+        let lastError: Error | null = null;
+
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          if (isCancelledRef.current) break;
+
+          try {
+            if (attempt > 1) {
+              addLog(`🔄 تلاش مجدد ${attempt} از ۳ برای بسته ${index + 1}...`);
+            }
+
+            const res = await fetch("/api/ai/categorize-taxonomy", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                articles: chunk,
+                existingTaxonomy: currentTaxonomy ? {
+                  existingCategoriesTree: currentTaxonomy.existingCategoriesTree,
+                  proposedNewCategoriesTree: currentTaxonomy.proposedNewCategoriesTree,
+                } : null,
+                batchIndex: index + 1,
+                totalBatches: chunks.length,
+                model: selectedModel,
+              }),
+            });
+
+            const rawResText = await res.text();
+            try {
+              responseData = JSON.parse(rawResText);
+            } catch (e) {
+              throw new Error(`خطای سرور در بسته ${index + 1} (کد ${res.status}): پاسخ دریافت شده JSON معتبر نبود.`);
+            }
+
+            if (!res.ok) {
+              throw new Error(responseData.error || `خطای سرور در بسته ${index + 1} با کد ${res.status}`);
+            }
+
+            if (responseData.success && responseData.data) {
+              lastError = null;
+              break; // Success!
+            } else {
+              throw new Error(responseData.error || `پاسخ دریافتی در بسته ${index + 1} شامل داده‌های معتبر نبود.`);
+            }
+          } catch (fetchErr: any) {
+            lastError = fetchErr;
+            if (attempt < 3 && !isCancelledRef.current) {
+              addLog(`⚠️ عدم موفقیت در بسته ${index + 1} (${fetchErr.message}). در حال انتظار ۲ ثانیه‌ای برای تلاش مجدد (${attempt}/3)...`);
+              await new Promise((r) => setTimeout(r, 2000));
+            }
+          }
         }
 
-        if (!res.ok) {
-          throw new Error(responseData.error || `خطای سرور در بسته ${index + 1} با کد ${res.status}`);
+        if (lastError) {
+          throw lastError;
         }
 
-        if (responseData.success && responseData.data) {
+        if (responseData && responseData.data) {
           currentTaxonomy = responseData.data;
-          // Live update UI tree
           setTaxonomy(currentTaxonomy);
 
           const totalMapped = countArticlesInTree(currentTaxonomy.existingCategoriesTree);
           const topCatsCount = currentTaxonomy.existingCategoriesTree?.length || 0;
-          addLog(`✅ بسته ${index + 1} با موفقیت پردازش شد. (کل مقالات دسته‌بندی‌شده تاکنون: ${totalMapped} از ${activeArticlesList.length} | تعداد دسته‌های اصلی: ${topCatsCount})`);
-        } else {
-          throw new Error(responseData.error || `پاسخ دریافتی در بسته ${index + 1} شامل داده‌های معتبر نبود.`);
+          addLog(`✅ بسته ${index + 1} با موفقیت پردازش شد. (کل مقالات دسته‌بندی‌شده: ${totalMapped} | تعداد دسته‌های اصلی: ${topCatsCount})`);
         }
 
-        // Brief delay for smooth UI feedback
         if (index < chunks.length - 1 && !isCancelledRef.current) {
           await new Promise((r) => setTimeout(r, 400));
         }
       }
 
       if (!isCancelledRef.current) {
-        addLog(`🎉 تحلیل بسته‌ای با موفقیت به پایان رسید! تمامی ${activeArticlesList.length} مقاله آنالیز و در درخت دسته‌بندی قرار گرفتند.`);
-        setSuccessMsg(`تحلیل هوشمند بسته‌ای و دسته‌بندی کامل تمامی ${activeArticlesList.length} مقاله با موفقیت انجام شد.`);
+        addLog(`🎉 تحلیل بسته‌ای با موفقیت به پایان رسید! تمامی مقالات با موفقیت آنالیز و در درخت دسته‌بندی قرار گرفتند.`);
+        setSuccessMsg(`تحلیل هوشمند بسته‌ای با موفقیت انجام شد.`);
       }
     } catch (err: any) {
       console.error("Batch taxonomy error:", err);
       const errMsg = err.message || "خطا در برقراری ارتباط با مدل هوش مصنوعی.";
       setError(errMsg);
       addLog(`❌ خطا در اجرای پردازش بسته‌ای: ${errMsg}`);
+      addLog(`💡 راهنما: نتایج تا این مرحله حفظ شده است. می‌توانید پس از بررسی، از دکمه «ادامه تحلیل مقالات باقی‌مانده» استفاده کنید.`);
     } finally {
       setLoading(false);
       setLoadingStep("");
       setBatchProgress(null);
     }
+  };
+
+  // Start fresh analysis for all active articles
+  const handleAnalyzeTaxonomy = () => {
+    if (!articles || articles.length === 0) {
+      setError("هیچ مقاله‌ای برای تحلیل وجود ندارد.");
+      return;
+    }
+    const activeArticlesList = articles.filter((a) => a.is_published !== "2");
+    runBatchProcessing(activeArticlesList, null, false);
+  };
+
+  // Resume analysis for unanalyzed articles
+  const handleResumeTaxonomy = () => {
+    if (unanalyzedArticles.length === 0) {
+      setSuccessMsg("تمامی مقالات فعال قبلاً در درخت دسته‌بندی قرار گرفته‌اند.");
+      return;
+    }
+    runBatchProcessing(unanalyzedArticles, taxonomy, true);
   };
 
   const handleCancelBatch = () => {
@@ -681,13 +731,35 @@ export default function AICategoryManager({
           </div>
 
           {!loading ? (
-            <button
-              onClick={handleAnalyzeTaxonomy}
-              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 shadow-[0_0_20px_rgba(6,182,212,0.3)] transition cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4 text-cyan-200" />
-              {taxonomy ? "بازتحلیل بسته‌ای با AI" : "شروع تحلیل بسته‌ای (Batching)"}
-            </button>
+            <>
+              {taxonomy && unanalyzedArticles.length > 0 ? (
+                <>
+                  <button
+                    onClick={handleResumeTaxonomy}
+                    className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 shadow-[0_0_20px_rgba(16,185,129,0.3)] transition cursor-pointer"
+                  >
+                    <Sparkles className="w-4 h-4 text-emerald-200" />
+                    ادامه تحلیل ({unanalyzedArticles.length} مقاله باقی‌مانده)
+                  </button>
+                  <button
+                    onClick={handleAnalyzeTaxonomy}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-white/10 font-medium px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
+                    title="حذف درخت فعلی و تحلیل کامل تمامی مقالات از ابتدا"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
+                    شروع از ابتدا
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={handleAnalyzeTaxonomy}
+                  className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 shadow-[0_0_20px_rgba(6,182,212,0.3)] transition cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4 text-cyan-200" />
+                  {taxonomy ? "بازتحلیل کامل بسته‌ای با AI" : "شروع تحلیل بسته‌ای (Batching)"}
+                </button>
+              )}
+            </>
           ) : (
             <button
               onClick={handleCancelBatch}
