@@ -9,7 +9,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Set up JSON body parser with a large limit for base64 uploads
 app.use(express.json({ limit: "50mb" }));
@@ -44,15 +44,71 @@ function getGeminiClient(): GoogleGenAI {
   return aiClient;
 }
 
+// Helper to robustly extract and parse JSON from AI model outputs
+function extractJsonFromText(rawText: string): any {
+  if (!rawText || !rawText.trim()) {
+    throw new Error("پاسخ دریافتی از هوش مصنوعی خالی بود.");
+  }
+
+  const trimmed = rawText.trim();
+
+  // 1. Direct JSON parse attempt
+  try {
+    return JSON.parse(trimmed);
+  } catch (e) {}
+
+  // 2. Remove markdown code fences anywhere in string
+  let cleaned = trimmed
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {}
+
+  // 3. Extract JSON object substring between first '{' and last '}'
+  const startIdx = trimmed.indexOf("{");
+  const endIdx = trimmed.lastIndexOf("}");
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    const jsonSub = trimmed.substring(startIdx, endIdx + 1);
+    try {
+      return JSON.parse(jsonSub);
+    } catch (e) {
+      // Clean trailing commas before closing braces/brackets
+      const repaired = jsonSub
+        .replace(/,\s*([}\]])/g, "$1")
+        .replace(/[\u201C\u201D]/g, '"');
+      try {
+        return JSON.parse(repaired);
+      } catch (e2) {}
+    }
+  }
+
+  // 4. Extract JSON array substring between first '[' and last ']'
+  const arrStart = trimmed.indexOf("[");
+  const arrEnd = trimmed.lastIndexOf("]");
+  if (arrStart !== -1 && arrEnd !== -1 && arrEnd > arrStart) {
+    const arrSub = trimmed.substring(arrStart, arrEnd + 1);
+    try {
+      return JSON.parse(arrSub);
+    } catch (e) {}
+  }
+
+  throw new Error("پاسخ هوش مصنوعی شامل ساختار JSON معتبر نبود.");
+}
+
 // Unified callAIService that switches to OpenRouter if OPENROUTER_API_KEY is configured
 async function callAIService({
   prompt,
   systemInstruction,
-  model
+  model,
+  responseFormatJson = false,
 }: {
   prompt: string;
   systemInstruction?: string;
   model?: string;
+  responseFormatJson?: boolean;
 }): Promise<string> {
   const rawKey = process.env.OPENROUTER_API_KEY;
   const openRouterApiKey = rawKey ? rawKey.replace(/['"]/g, "").trim() : "";
@@ -66,6 +122,16 @@ async function callAIService({
     }
     messages.push({ role: "user", content: prompt });
 
+    const requestBody: any = {
+      model: userOpenRouterModel,
+      messages: messages,
+    };
+
+    // Only add response_format for OpenAI or specific models that support json_object
+    if (responseFormatJson && (userOpenRouterModel.includes("openai") || userOpenRouterModel.includes("gpt"))) {
+      requestBody.response_format = { type: "json_object" };
+    }
+
     try {
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -75,10 +141,7 @@ async function callAIService({
           "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
           "X-Title": "AI Admin Article Publisher",
         },
-        body: JSON.stringify({
-          model: userOpenRouterModel,
-          messages: messages,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -98,31 +161,66 @@ async function callAIService({
           console.warn("Attempting automatic fallback to direct Gemini API because OpenRouter returned an error:", response.status);
           try {
             const ai = getGeminiClient();
-            const config = systemInstruction ? { systemInstruction } : undefined;
+            const config: any = {};
+            if (systemInstruction) config.systemInstruction = systemInstruction;
+            if (responseFormatJson) config.responseMimeType = "application/json";
+
             const fallbackResponse = await ai.models.generateContent({
-              model: "gemini-3.5-flash",
+              model: "gemini-2.5-flash",
               contents: prompt,
               config,
             });
-            return fallbackResponse.text || "";
+            if (fallbackResponse.text && fallbackResponse.text.trim()) {
+              return fallbackResponse.text;
+            }
           } catch (geminiErr: any) {
             console.error("Gemini fallback also failed:", geminiErr);
           }
         }
 
         if (isRateLimit) {
-          throw new Error(`خطای محدودیت ترافیک هوش مصنوعی (Rate Limit - 429): مدل انتخابی در حال حاضر شلوغ یا محدود شده است. لطفاً مدل دیگری (مثلاً gpt, gemini یا deepseek) انتخاب کنید یا دقایقی دیگر مجدداً تلاش نمایید. جزئیات: ${errMsg}`);
+          throw new Error(`خطای محدودیت ترافیک هوش مصنوعی (Rate Limit - 429): مدل انتخابی در حال حاضر شلوغ یا محدود شده است. لطفاً مدل دیگری انتخاب کنید. جزئیات: ${errMsg}`);
         }
         
         throw new Error(`خطای سرویس هوش مصنوعی (کد ${response.status}): ${errMsg}`);
       }
 
-      const data: any = await response.json();
-      if (data.choices && data.choices[0] && data.choices[0].message) {
-        return data.choices[0].message.content || "";
-      } else {
-        throw new Error("قالب پاسخ دریافتی از OpenRouter نامعتبر است.");
+      const resText = await response.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(resText);
+      } catch (jsonErr) {
+        console.warn("Failed to parse OpenRouter response as JSON:", resText);
       }
+
+      const content = data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : "";
+
+      if (content && content.trim()) {
+        return content;
+      }
+
+      console.warn("OpenRouter returned empty content or non-JSON body. Trying direct Gemini fallback...");
+      if (process.env.GEMINI_API_KEY) {
+        try {
+          const ai = getGeminiClient();
+          const config: any = {};
+          if (systemInstruction) config.systemInstruction = systemInstruction;
+          if (responseFormatJson) config.responseMimeType = "application/json";
+
+          const fallbackResponse = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config,
+          });
+          if (fallbackResponse.text && fallbackResponse.text.trim()) {
+            return fallbackResponse.text;
+          }
+        } catch (geminiErr: any) {
+          console.error("Gemini fallback after empty OpenRouter content failed:", geminiErr);
+        }
+      }
+
+      throw new Error("سرویس هوش مصنوعی پاسخی برنگرداند (پاسخ خالی).");
     } catch (err: any) {
       console.error("OpenRouter request failed, checking fallback:", err);
       // Fallback for network timeouts or generic failures
@@ -130,13 +228,18 @@ async function callAIService({
         console.warn("Attempting fallback to Gemini API after unexpected OpenRouter exception.");
         try {
           const ai = getGeminiClient();
-          const config = systemInstruction ? { systemInstruction } : undefined;
+          const config: any = {};
+          if (systemInstruction) config.systemInstruction = systemInstruction;
+          if (responseFormatJson) config.responseMimeType = "application/json";
+
           const fallbackResponse = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-2.5-flash",
             contents: prompt,
             config,
           });
-          return fallbackResponse.text || "";
+          if (fallbackResponse.text && fallbackResponse.text.trim()) {
+            return fallbackResponse.text;
+          }
         } catch (geminiErr: any) {
           console.error("Gemini fallback failed on generic catch:", geminiErr);
         }
@@ -146,9 +249,12 @@ async function callAIService({
   } else {
     console.log("Routing AI request to Gemini API (No OpenRouter Key is configured)");
     const ai = getGeminiClient();
-    const config = systemInstruction ? { systemInstruction } : undefined;
+    const config: any = {};
+    if (systemInstruction) config.systemInstruction = systemInstruction;
+    if (responseFormatJson) config.responseMimeType = "application/json";
+
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config,
     });
@@ -313,6 +419,133 @@ app.post("/api/gemini/expand", async (req, res) => {
   } catch (error: any) {
     console.error("Expand error:", error);
     res.status(500).json({ error: error.message || "Failed to expand content via AI service" });
+  }
+});
+
+// AI Taxonomy Analysis and Multi-level Category Recommendation endpoint
+app.post("/api/ai/categorize-taxonomy", async (req, res) => {
+  try {
+    const { articles, model } = req.body;
+    if (!articles || !Array.isArray(articles) || articles.length === 0) {
+      return res.status(400).json({ error: "لیست مقالات برای تحلیل الزامی است." });
+    }
+
+    const simplifiedArticles = articles.map((a: any) => ({
+      id: String(a.id),
+      title: a.title || "",
+      description: a.description ? String(a.description).substring(0, 250) : "",
+      keywords: a.keywords || "",
+      tags: a.tags || "",
+      category_id: a.category_id || "",
+    }));
+
+    const systemInstruction = `You are a world-class AI content taxonomist and metadata strategist.
+Your task is to analyze the provided articles and produce a multi-level hierarchical category tree (taxonomy) with trilingual titles (Persian, English, Arabic) and a clean English URL slug for every category and subcategory, along with a set of proposed NEW categories for future content expansion.
+
+Strict Rules:
+1. Every category object MUST include:
+   - "slug": lower-case URL-friendly English slug (e.g. "artificial-intelligence", "seo-optimization", "web-development")
+   - "nameFa": Title in Persian (Farsi)
+   - "nameEn": Title in English
+   - "nameAr": Title in Arabic
+   - "name": Duplicate of "nameFa" for backward compatibility
+   - "enName": Duplicate of "nameEn" for backward compatibility
+2. "existingCategoriesTree": Hierarchical categories and multi-level subcategories (Level 1, Level 2, etc.) derived directly from analyzing the articles.
+   - Map every article's ID to the most specific subcategory or category it belongs to in "articleIds": ["id1", "id2"]. Every article provided MUST be mapped.
+3. "proposedNewCategoriesTree": Multi-level new proposed categories (with empty "articleIds": []) that do NOT have current articles but are highly relevant for content expansion. Include a "suggestedReason" in Persian for each proposed category.
+4. "summary": A brief analytical overview (2-3 sentences in Persian) summarizing the topic clusters found and strategic content recommendations.
+
+Output MUST be purely valid JSON without any markdown code fence wrappers (\`\`\`json) or conversational text.
+
+Required JSON Structure:
+{
+  "title": "درخت تحلیل و دسته‌بندی هوشمند مقالات",
+  "summary": "تحلیل خلاصه هوش مصنوعی از ساختار مقالات...",
+  "existingCategoriesTree": [
+    {
+      "id": "cat_1",
+      "slug": "digital-marketing",
+      "nameFa": "بازاریابی دیجیتال",
+      "nameEn": "Digital Marketing",
+      "nameAr": "التسويق الرقمي",
+      "name": "بازاریابی دیجیتال",
+      "enName": "Digital Marketing",
+      "description": "توضیح کوتاه دسته",
+      "articleIds": ["1", "2"],
+      "subcategories": [
+        {
+          "id": "sub_1_1",
+          "slug": "seo-content-strategy",
+          "nameFa": "سئو و استراتژی محتوا",
+          "nameEn": "SEO & Content Strategy",
+          "nameAr": "سيو واستراتيجية المحتوى",
+          "name": "سئو و استراتژی محتوا",
+          "enName": "SEO & Content Strategy",
+          "description": "توضیح زیردسته",
+          "articleIds": ["3"],
+          "subcategories": []
+        }
+      ]
+    }
+  ],
+  "proposedNewCategoriesTree": [
+    {
+      "id": "prop_1",
+      "slug": "ai-automation-agents",
+      "nameFa": "اتوماسیون و ایجنت‌های هوش مصنوعی",
+      "nameEn": "AI Automation & Agents",
+      "nameAr": "الأتمتة ووكلاء الذكاء الاصطناعي",
+      "name": "اتوماسیون و ایجنت‌های هوش مصنوعی",
+      "enName": "AI Automation & Agents",
+      "description": "توضیح دسته",
+      "suggestedReason": "علت پیشنهاد هوش مصنوعی جهت توسعه محتوای آتی...",
+      "articleIds": [],
+      "subcategories": []
+    }
+  ]
+}`;
+
+    const prompt = `لطفاً مقالات زیر را به صورت کامل آنالیز کرده و درخت دسته‌بندی چندسطحی (دسته‌های اصلی و زیردسته‌ها) همراه با پیشنهادهای جدید را استخراج نمایید:
+
+مقالات (${simplifiedArticles.length} عدد):
+${JSON.stringify(simplifiedArticles, null, 2)}`;
+
+    console.log(`[Categorize Taxonomy] Analyzing ${simplifiedArticles.length} articles with model ${model || "default"}...`);
+
+    const rawResult = await callAIService({
+      prompt,
+      systemInstruction,
+      model,
+      responseFormatJson: true,
+    });
+
+    let taxonomyData;
+    try {
+      taxonomyData = extractJsonFromText(rawResult);
+    } catch (parseErr: any) {
+      console.error("[Categorize Taxonomy] JSON Parse Error. Raw response was:", rawResult);
+      throw new Error(parseErr.message || "پاسخ هوش مصنوعی ساختار JSON معتبر نداشت. لطفاً مجدداً تلاش نمایید.");
+    }
+
+    // Ensure fallback arrays exist if model omitted them
+    if (!taxonomyData.existingCategoriesTree) {
+      taxonomyData.existingCategoriesTree = [];
+    }
+    if (!taxonomyData.proposedNewCategoriesTree) {
+      taxonomyData.proposedNewCategoriesTree = [];
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...taxonomyData,
+        totalArticlesAnalyzed: simplifiedArticles.length,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+  } catch (error: any) {
+    console.error("[Categorize Taxonomy] Error:", error);
+    res.status(500).json({ error: error.message || "خطا در تحلیل و دسته‌بندی هوشمند مقالات" });
   }
 });
 

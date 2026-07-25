@@ -37,3 +37,27 @@ export interface CSVImportOptions {
 }
 
 export type LangTab = "fa" | "en" | "ar";
+
+export interface TaxonomyCategory {
+  id: string;
+  slug: string;             // URL slug in English (e.g. "tech-ai-tools")
+  nameFa: string;           // Name in Persian
+  nameEn: string;           // Name in English
+  nameAr: string;           // Name in Arabic
+  name?: string;            // Fallback for Persian name
+  enName?: string;          // Fallback for English name
+  description?: string;     // Short description of category scope
+  articleIds?: string[];    // Array of Article IDs assigned to this category
+  subcategories?: TaxonomyCategory[]; // Multi-level nested child categories
+  suggestedReason?: string; // Reason/context for AI proposed categories
+  icon?: string;            // Icon name key if available
+}
+
+export interface TaxonomyResult {
+  title: string;
+  summary: string;
+  totalArticlesAnalyzed: number;
+  existingCategoriesTree: TaxonomyCategory[];
+  proposedNewCategoriesTree: TaxonomyCategory[];
+  updatedAt: string;
+}

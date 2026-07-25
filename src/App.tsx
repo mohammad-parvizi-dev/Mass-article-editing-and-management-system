@@ -4,10 +4,11 @@ import { INITIAL_ARTICLES } from "./data/initialArticles";
 import DashboardStats from "./components/DashboardStats";
 import CSVImporterExporter from "./components/CSVImporterExporter";
 import ChapterizerPanel from "./components/ChapterizerPanel";
+import AICategoryManager from "./components/AICategoryManager";
 import ArticleList from "./components/ArticleList";
 import ArticleEditor from "./components/ArticleEditor";
 import OpenRouterModelSelector from "./components/OpenRouterModelSelector";
-import { ShieldCheck, Sparkles, BookOpen, Heart, RefreshCw } from "lucide-react";
+import { ShieldCheck, Sparkles, BookOpen, Heart, RefreshCw, AlertTriangle } from "lucide-react";
 
 export default function App() {
   const [openRouterEnabled, setOpenRouterEnabled] = useState(true);
@@ -49,6 +50,8 @@ export default function App() {
   });
 
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetKey, setResetKey] = useState(0);
 
   // Sync to local storage
   useEffect(() => {
@@ -196,10 +199,20 @@ export default function App() {
 
   // Reset demo back to beautiful Isfahan defaults
   const handleResetToDefaults = () => {
-    if (confirm("آیا حتما می‌خواهید کل داده‌های سیستم بازنشانی و مقالات پیش‌فرض اصفهان بارگذاری شوند؟")) {
-      setArticles(INITIAL_ARTICLES);
-      setSelectedArticleId(INITIAL_ARTICLES[0].id);
+    setShowResetModal(true);
+  };
+
+  const executeReset = () => {
+    try {
+      localStorage.removeItem("articles_db");
+      localStorage.removeItem("ai_taxonomy_cache");
+    } catch (e) {
+      console.error("Failed to clear localStorage caches:", e);
     }
+    setArticles(INITIAL_ARTICLES);
+    setSelectedArticleId(INITIAL_ARTICLES[0]?.id || null);
+    setResetKey((prev) => prev + 1);
+    setShowResetModal(false);
   };
 
   return (
@@ -266,8 +279,17 @@ export default function App() {
 
         {/* Custom Chapterizer and specialized JSON export panel */}
         <ChapterizerPanel
+          key={`chap-${resetKey}`}
           articles={articles}
           selectedArticleId={selectedArticleId}
+          onUpdateArticles={(updated) => setArticles(updated)}
+          selectedModel={selectedModel}
+        />
+
+        {/* AI Multi-level Category & Taxonomy Manager */}
+        <AICategoryManager
+          key={`tax-${resetKey}`}
+          articles={articles}
           onUpdateArticles={(updated) => setArticles(updated)}
           selectedModel={selectedModel}
         />
@@ -314,6 +336,42 @@ export default function App() {
           </div>
         </div>
       </footer>
+      {/* Modal Dialog for Reset Demo Confirmation */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm dir-rtl animate-fadeIn">
+          <div className="bg-[#0f1015] border border-white/10 rounded-2xl p-6 max-w-md w-full shadow-2xl text-right space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">بازنشانی کامل دمو</h3>
+                <p className="text-xs text-slate-400 mt-0.5">آیا مطمئن هستید؟</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/5">
+              با این اقدام، تمام تغییرات مقالات و حافظه کش دسته‌بندی‌های ساخته شده توسط AI پاک شده و داده‌های اولیه اصفهان به حالت پیش‌فرض بازگردانی می‌شوند.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowResetModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition cursor-pointer"
+              >
+                انصراف
+              </button>
+              <button
+                onClick={executeReset}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 shadow-[0_0_15px_rgba(225,29,72,0.4)] transition cursor-pointer flex items-center gap-1.5"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                بله، بازنشانی کن
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

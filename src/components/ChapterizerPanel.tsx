@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { parseHtmlToChapters, transformToSiteJson, stripImages, StructuredChapter } from "../utils/chapterizer";
 import { Article } from "../types";
 import { 
@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 
 interface ChapterizerPanelProps {
+  key?: React.Key;
   articles: Article[];
   selectedArticleId: string | null;
   onUpdateArticles: (updatedList: Article[]) => void;
