@@ -3,7 +3,7 @@ import { parseHtmlToChapters, transformToSiteJson, stripImages, StructuredChapte
 import { Article } from "../types";
 import { 
   Sparkles, Layers, FileJson, Check, Copy, HelpCircle, FileText, ChevronDown, CheckCircle, Flame, Download, ImageOff, Trash2,
-  RefreshCw, Play, Pause, AlertTriangle, Languages, Link as LinkIcon, Cpu, Clock
+  RefreshCw, Play, Pause, AlertTriangle, Languages, Link as LinkIcon, Cpu, Clock, Filter
 } from "lucide-react";
 
 interface ChapterizerPanelProps {
@@ -30,6 +30,7 @@ export default function ChapterizerPanel({
   // --- STATE FOR BATCH AI QUEUE ---
   const [safetyDelay, setSafetyDelay] = useState<number>(3); // safety delay in seconds
   const [batchOp, setBatchOp] = useState<"translate" | "tags" | "slug" | "description" | "long_summary" | null>(null);
+  const [filterMode, setFilterMode] = useState<"only_empty" | "all">("only_empty");
   
   interface QueueItem {
     id: string;
@@ -68,19 +69,55 @@ export default function ChapterizerPanel({
     batchOpRef.current = batchOp;
   }, [batchOp]);
 
-  const handleInitQueue = (operation: "translate" | "tags" | "slug" | "description" | "long_summary") => {
-    const activeArticles = articles.filter(art => art.is_published !== "2");
+  // Helper to filter target articles based on empty field requirement or all
+  const getTargetArticles = (
+    operation: "translate" | "tags" | "slug" | "description" | "long_summary",
+    onlyEmpty: boolean
+  ) => {
+    const active = articles.filter((art) => art.is_published !== "2");
+    if (!onlyEmpty) return active;
+
+    return active.filter((art) => {
+      if (operation === "translate") {
+        return !art.en_title?.trim() || !art.en_description?.trim() || !art.en_body?.trim();
+      }
+      if (operation === "description") {
+        return !art.description?.trim();
+      }
+      if (operation === "long_summary") {
+        return !art.long_summary?.trim();
+      }
+      if (operation === "tags") {
+        return !art.tags?.trim();
+      }
+      if (operation === "slug") {
+        return !art.slug?.trim();
+      }
+      return true;
+    });
+  };
+
+  const handleInitQueue = (
+    operation: "translate" | "tags" | "slug" | "description" | "long_summary",
+    overrideOnlyEmpty?: boolean
+  ) => {
+    const useEmptyFilter = overrideOnlyEmpty !== undefined ? overrideOnlyEmpty : filterMode === "only_empty";
+    const targetArticles = getTargetArticles(operation, useEmptyFilter);
     
-    if (activeArticles.length === 0) {
-      setSuccessMsg("هیچ مقاله فعالی جهت پردازش گروهی یافت نشد.");
+    if (targetArticles.length === 0) {
+      setSuccessMsg(
+        useEmptyFilter
+          ? "هیچ مقاله‌ای با فیلد خالی برای این عملیات یافت نشد (تمامی مقالات این فیلد را دارا هستند)."
+          : "هیچ مقاله فعالی جهت پردازش گروهی یافت نشد."
+      );
       setTimeout(() => setSuccessMsg(null), 5000);
       return;
     }
     
-    const initialQueue: QueueItem[] = activeArticles.map(art => ({
+    const initialQueue: QueueItem[] = targetArticles.map((art) => ({
       id: art.id,
       title: art.title || "بدون عنوان",
-      status: "idle"
+      status: "idle",
     }));
     
     setQueue(initialQueue);
@@ -88,7 +125,19 @@ export default function ChapterizerPanel({
     setBatchOp(operation);
     setIsQueueRunning(false);
     setQueueIndex(-1);
-    setSuccessMsg(`صف پردازش برای تمامی ${activeArticles.length} مقاله فعال با موفقیت آماده شد. کلید شروع را فشار دهید تا کار آغاز شود.`);
+
+    const opLabels: Record<string, string> = {
+      translate: "ترجمه دوزبانه انگلیسی",
+      description: "چکیده / توضیحات کوتاه (فارسی)",
+      long_summary: "خلاصه مفصل / مقدمه مقاله (فارسی)",
+      tags: "کلیدواژه‌ساز ترکیبی",
+      slug: "اسلاگ‌ساز انگلیسی",
+    };
+
+    const modeText = useEmptyFilter ? "فقط مقالات دارای فیلد خالی" : "تمامی مقالات فعال";
+    setSuccessMsg(
+      `صف پردازش «${opLabels[operation]}» برای ${targetArticles.length} مقاله (${modeText}) با موفقیت آماده شد. کلید شروع را فشار دهید تا کار آغاز شود.`
+    );
     setTimeout(() => setSuccessMsg(null), 6000);
   };
 
@@ -819,53 +868,302 @@ export default function ChapterizerPanel({
             </div>
 
             {batchOp === null ? (
-              <div className="bg-black/40 border border-dashed border-white/15 p-6 rounded-xl text-center space-y-4">
-                <p className="text-xs text-slate-300 font-medium">لطفاً یکی از فرآیندهای فله‌ای هوش مصنوعی زیر را جهت آماده‌سازی صف درخواست‌های کلی انتخاب کنید:</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  <button
-                    onClick={() => handleInitQueue("translate")}
-                    className="flex flex-col items-center justify-center p-4 bg-cyan-950/20 hover:bg-cyan-950/40 border border-cyan-500/20 hover:border-cyan-500/40 rounded-xl transition cursor-pointer group"
-                  >
-                    <Languages className="w-6 h-6 text-cyan-400 mb-2 group-hover:scale-110 transition" />
-                    <span className="text-xs font-bold text-cyan-200">مترجم دوزبانه انگلیسی</span>
-                    <span className="text-[10px] text-slate-400 mt-1">ترجمه فیلدهای عنوان، چکیده و بدنه HTML کل مقالات</span>
-                  </button>
+              <div className="bg-black/40 border border-dashed border-white/15 p-5 rounded-xl space-y-4">
+                {/* Filter Mode Header Switcher */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-950/80 p-3 rounded-xl border border-white/10 text-right">
+                  <div className="flex items-center gap-2">
+                    <Filter className="w-4 h-4 text-cyan-400 shrink-0" />
+                    <div>
+                      <span className="text-xs font-extrabold text-white block">حالت انتخاب مقالات برای صف:</span>
+                      <span className="text-[10px] text-slate-400">می‌توانید تمام مقالات یا فقط مواردی که فیلد آن‌ها خالی است را هدف قرار دهید.</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center p-1 bg-black/60 border border-white/10 rounded-lg gap-1 shrink-0 w-full sm:w-auto justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setFilterMode("only_empty")}
+                      className={`px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
+                        filterMode === "only_empty"
+                          ? "bg-cyan-500 text-slate-950 font-black shadow-md"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      فقط مقالات دارای فیلد خالی / بدون مقدار
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFilterMode("all")}
+                      className={`px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
+                        filterMode === "all"
+                          ? "bg-cyan-500 text-slate-950 font-black shadow-md"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      تمامی مقالات فعال (بازنویسی کامل)
+                    </button>
+                  </div>
+                </div>
 
-                  <button
-                    onClick={() => handleInitQueue("description")}
-                    className="flex flex-col items-center justify-center p-4 bg-purple-950/20 hover:bg-purple-950/40 border border-purple-500/20 hover:border-purple-500/40 rounded-xl transition cursor-pointer group"
-                  >
-                    <FileText className="w-6 h-6 text-purple-400 mb-2 group-hover:scale-110 transition" />
-                    <span className="text-xs font-bold text-purple-200">چکیده / توضیحات کوتاه (فارسی)</span>
-                    <span className="text-[10px] text-slate-400 mt-1">خلاصه‌سازی هوشمند و تولید چکیده کوتاه برای کل مقالات</span>
-                  </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+                  {/* 1. Translation */}
+                  {(() => {
+                    const emptyCount = getTargetArticles("translate", true).length;
+                    const totalCount = getTargetArticles("translate", false).length;
+                    const activeCount = filterMode === "only_empty" ? emptyCount : totalCount;
+                    return (
+                      <div className="flex flex-col justify-between p-4 bg-cyan-950/20 hover:bg-cyan-950/30 border border-cyan-500/20 rounded-xl transition group">
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <Languages className="w-6 h-6 text-cyan-400 group-hover:scale-110 transition" />
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              emptyCount > 0 
+                                ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/30 font-mono" 
+                                : "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                            }`}>
+                              {emptyCount > 0 ? `${emptyCount} مقاله بدون ترجمه` : "ترجمه کامل"}
+                            </span>
+                          </div>
+                          <h4 className="text-xs font-bold text-cyan-200">مترجم دوزبانه انگلیسی</h4>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                            ترجمه فیلدهای عنوان، چکیده و بدنه HTML مقالات.
+                          </p>
+                        </div>
+                        <div className="mt-4 pt-3 border-t border-white/5 space-y-2">
+                          <button
+                            onClick={() => handleInitQueue("translate")}
+                            className="w-full py-2 px-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-bold transition shadow cursor-pointer"
+                          >
+                            ایجاد صف ({activeCount} مقاله)
+                          </button>
+                          <div className="flex justify-between items-center text-[10px] text-slate-400 px-1 font-mono">
+                            <button
+                              type="button"
+                              onClick={() => handleInitQueue("translate", true)}
+                              className="hover:text-cyan-300 underline cursor-pointer"
+                            >
+                              فقط بدون ترجمه ({emptyCount})
+                            </button>
+                            <span>•</span>
+                            <button
+                              type="button"
+                              onClick={() => handleInitQueue("translate", false)}
+                              className="hover:text-cyan-300 underline cursor-pointer"
+                            >
+                              همه ({totalCount})
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
-                  <button
-                    onClick={() => handleInitQueue("long_summary")}
-                    className="flex flex-col items-center justify-center p-4 bg-indigo-950/20 hover:bg-indigo-950/40 border border-indigo-500/20 hover:border-indigo-500/40 rounded-xl transition cursor-pointer group"
-                  >
-                    <Sparkles className="w-6 h-6 text-indigo-400 mb-2 group-hover:scale-110 transition" />
-                    <span className="text-xs font-bold text-indigo-200">خلاصه مفصل / مقدمه مقاله (فارسی)</span>
-                    <span className="text-[10px] text-slate-400 mt-1">تولید مقدمه چند پاراگرافی و خلاصه جامع برای کل مقالات</span>
-                  </button>
+                  {/* 2. Short Description */}
+                  {(() => {
+                    const emptyCount = getTargetArticles("description", true).length;
+                    const totalCount = getTargetArticles("description", false).length;
+                    const activeCount = filterMode === "only_empty" ? emptyCount : totalCount;
+                    return (
+                      <div className="flex flex-col justify-between p-4 bg-purple-950/20 hover:bg-purple-950/30 border border-purple-500/20 rounded-xl transition group">
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <FileText className="w-6 h-6 text-purple-400 group-hover:scale-110 transition" />
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              emptyCount > 0 
+                                ? "bg-purple-500/20 text-purple-300 border-purple-500/30 font-mono" 
+                                : "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                            }`}>
+                              {emptyCount > 0 ? `${emptyCount} مقاله بدون چکیده` : "چکیده‌ها کامل است"}
+                            </span>
+                          </div>
+                          <h4 className="text-xs font-bold text-purple-200">چکیده / توضیحات کوتاه (فارسی)</h4>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                            خلاصه‌سازی هوشمند و تولید چکیده کوتاه زیر ۱۸۰ کاراکتر.
+                          </p>
+                        </div>
+                        <div className="mt-4 pt-3 border-t border-white/5 space-y-2">
+                          <button
+                            onClick={() => handleInitQueue("description")}
+                            className="w-full py-2 px-3 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition shadow cursor-pointer"
+                          >
+                            ایجاد صف ({activeCount} مقاله)
+                          </button>
+                          <div className="flex justify-between items-center text-[10px] text-slate-400 px-1 font-mono">
+                            <button
+                              type="button"
+                              onClick={() => handleInitQueue("description", true)}
+                              className="hover:text-purple-300 underline cursor-pointer"
+                            >
+                              فقط بدون چکیده ({emptyCount})
+                            </button>
+                            <span>•</span>
+                            <button
+                              type="button"
+                              onClick={() => handleInitQueue("description", false)}
+                              className="hover:text-purple-300 underline cursor-pointer"
+                            >
+                              همه ({totalCount})
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
-                  <button
-                    onClick={() => handleInitQueue("tags")}
-                    className="flex flex-col items-center justify-center p-4 bg-emerald-950/20 hover:bg-emerald-950/40 border border-emerald-500/20 hover:border-emerald-500/40 rounded-xl transition cursor-pointer group"
-                  >
-                    <CheckCircle className="w-6 h-6 text-emerald-400 mb-2 group-hover:scale-110 transition" />
-                    <span className="text-xs font-bold text-emerald-200">کلیدواژه‌ساز ترکیبی</span>
-                    <span className="text-[10px] text-slate-400 mt-1">تولید بین ۳ الی ۱۰ تگ فارسی/انگلیسی برای کل مقالات</span>
-                  </button>
+                  {/* 3. Long Summary / Introduction */}
+                  {(() => {
+                    const emptyCount = getTargetArticles("long_summary", true).length;
+                    const totalCount = getTargetArticles("long_summary", false).length;
+                    const activeCount = filterMode === "only_empty" ? emptyCount : totalCount;
+                    return (
+                      <div className="flex flex-col justify-between p-4 bg-indigo-950/20 hover:bg-indigo-950/30 border border-indigo-500/20 rounded-xl transition group">
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <Sparkles className="w-6 h-6 text-indigo-400 group-hover:scale-110 transition" />
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              emptyCount > 0 
+                                ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/30 font-mono" 
+                                : "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                            }`}>
+                              {emptyCount > 0 ? `${emptyCount} مقاله بدون مقدمه` : "مقدمه‌ها کامل است"}
+                            </span>
+                          </div>
+                          <h4 className="text-xs font-bold text-indigo-200">خلاصه مفصل / مقدمه مقاله (فارسی)</h4>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                            تولید مقدمه چند پاراگرافی و خلاصه جامع برای مقالات.
+                          </p>
+                        </div>
+                        <div className="mt-4 pt-3 border-t border-white/5 space-y-2">
+                          <button
+                            onClick={() => handleInitQueue("long_summary")}
+                            className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition shadow cursor-pointer"
+                          >
+                            ایجاد صف ({activeCount} مقاله)
+                          </button>
+                          <div className="flex justify-between items-center text-[10px] text-slate-400 px-1 font-mono">
+                            <button
+                              type="button"
+                              onClick={() => handleInitQueue("long_summary", true)}
+                              className="hover:text-indigo-300 underline cursor-pointer"
+                            >
+                              فقط بدون مقدمه ({emptyCount})
+                            </button>
+                            <span>•</span>
+                            <button
+                              type="button"
+                              onClick={() => handleInitQueue("long_summary", false)}
+                              className="hover:text-indigo-300 underline cursor-pointer"
+                            >
+                              همه ({totalCount})
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
-                  <button
-                    onClick={() => handleInitQueue("slug")}
-                    className="flex flex-col items-center justify-center p-4 bg-amber-950/20 hover:bg-amber-950/40 border border-amber-500/20 hover:border-amber-500/40 rounded-xl transition cursor-pointer group"
-                  >
-                    <LinkIcon className="w-6 h-6 text-amber-400 mb-2 group-hover:scale-110 transition" />
-                    <span className="text-xs font-bold text-amber-200">اسلاگ‌ساز انگلیسی یکتا</span>
-                    <span className="text-[10px] text-slate-400 mt-1">تولید اسلاگ سئو استاندارد (Slug) برای آدرس کلیه مقالات</span>
-                  </button>
+                  {/* 4. Tags */}
+                  {(() => {
+                    const emptyCount = getTargetArticles("tags", true).length;
+                    const totalCount = getTargetArticles("tags", false).length;
+                    const activeCount = filterMode === "only_empty" ? emptyCount : totalCount;
+                    return (
+                      <div className="flex flex-col justify-between p-4 bg-emerald-950/20 hover:bg-emerald-950/30 border border-emerald-500/20 rounded-xl transition group">
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <CheckCircle className="w-6 h-6 text-emerald-400 group-hover:scale-110 transition" />
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              emptyCount > 0 
+                                ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30 font-mono" 
+                                : "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                            }`}>
+                              {emptyCount > 0 ? `${emptyCount} مقاله بدون برچسب` : "برچسب‌ها کامل است"}
+                            </span>
+                          </div>
+                          <h4 className="text-xs font-bold text-emerald-200">کلیدواژه‌ساز ترکیبی</h4>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                            تولید بین ۳ الی ۱۰ برچسب فارسی و انگلیسی.
+                          </p>
+                        </div>
+                        <div className="mt-4 pt-3 border-t border-white/5 space-y-2">
+                          <button
+                            onClick={() => handleInitQueue("tags")}
+                            className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow cursor-pointer"
+                          >
+                            ایجاد صف ({activeCount} مقاله)
+                          </button>
+                          <div className="flex justify-between items-center text-[10px] text-slate-400 px-1 font-mono">
+                            <button
+                              type="button"
+                              onClick={() => handleInitQueue("tags", true)}
+                              className="hover:text-emerald-300 underline cursor-pointer"
+                            >
+                              فقط بدون برچسب ({emptyCount})
+                            </button>
+                            <span>•</span>
+                            <button
+                              type="button"
+                              onClick={() => handleInitQueue("tags", false)}
+                              className="hover:text-emerald-300 underline cursor-pointer"
+                            >
+                              همه ({totalCount})
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* 5. Slug */}
+                  {(() => {
+                    const emptyCount = getTargetArticles("slug", true).length;
+                    const totalCount = getTargetArticles("slug", false).length;
+                    const activeCount = filterMode === "only_empty" ? emptyCount : totalCount;
+                    return (
+                      <div className="flex flex-col justify-between p-4 bg-amber-950/20 hover:bg-amber-950/30 border border-amber-500/20 rounded-xl transition group">
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <LinkIcon className="w-6 h-6 text-amber-400 group-hover:scale-110 transition" />
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              emptyCount > 0 
+                                ? "bg-amber-500/20 text-amber-300 border-amber-500/30 font-mono" 
+                                : "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                            }`}>
+                              {emptyCount > 0 ? `${emptyCount} مقاله بدون اسلاگ` : "اسلاگ‌ها کامل است"}
+                            </span>
+                          </div>
+                          <h4 className="text-xs font-bold text-amber-200">اسلاگ‌ساز انگلیسی یکتا</h4>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                            تولید اسلاگ سئو استاندارد انگلیسی برای آدرس صفحات.
+                          </p>
+                        </div>
+                        <div className="mt-4 pt-3 border-t border-white/5 space-y-2">
+                          <button
+                            onClick={() => handleInitQueue("slug")}
+                            className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold transition shadow cursor-pointer"
+                          >
+                            ایجاد صف ({activeCount} مقاله)
+                          </button>
+                          <div className="flex justify-between items-center text-[10px] text-slate-400 px-1 font-mono">
+                            <button
+                              type="button"
+                              onClick={() => handleInitQueue("slug", true)}
+                              className="hover:text-amber-300 underline cursor-pointer"
+                            >
+                              فقط بدون اسلاگ ({emptyCount})
+                            </button>
+                            <span>•</span>
+                            <button
+                              type="button"
+                              onClick={() => handleInitQueue("slug", false)}
+                              className="hover:text-amber-300 underline cursor-pointer"
+                            >
+                              همه ({totalCount})
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             ) : (
