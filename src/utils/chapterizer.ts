@@ -106,13 +106,19 @@ export function transformToSiteJson(art: any, chaptersList: StructuredChapter[])
     ? art.tags.split(",").map(t => t.trim()).filter(Boolean)
     : ["tag1"]; // Default tag fallback if empty
 
+  // Extract category_id from article; if empty fallback to ["test"]
+  const rawCatId = art.category_id !== undefined && art.category_id !== null ? String(art.category_id).trim() : "";
+  const articleCategories = rawCatId
+    ? rawCatId.split(",").map(c => c.trim()).filter(Boolean)
+    : ["test"];
+
   return {
     item_type: "POST",
     content_type: "ARTICLE",
     product_type: null,
     access_type: "FREE",
     author: "mohammadpp955.pp955@gmail.com",
-    categories: ["test"],
+    categories: articleCategories,
     tags: articleTags,
     subscriptions: [],
     stock: 0,
