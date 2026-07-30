@@ -1,7 +1,7 @@
 /**
  * parseHtmlToChapters
- * Parses an HTML string into discrete chapters based on header tags (H1-H6).
- * Words before the first header are flushed into a custom header or the article name.
+ * Parses an HTML string into discrete chapters based on header tags (H1-H6),
+ * as well as list items/styled subheadings, avoiding empty chapters.
  */
 export interface StructuredChapter {
   order: number;
@@ -9,17 +9,138 @@ export interface StructuredChapter {
   content: string;
 }
 
+function cleanTitle(raw: string): string {
+  if (!raw) return "";
+  let text = raw.replace(/<[^>]*>/g, "").replace(/&nbsp;/gi, " ").trim();
+  text = text.replace(/\s+/g, " ");
+  return text;
+}
+
+function hasVisibleContent(html: string): boolean {
+  if (!html || !html.trim()) return false;
+  if (/<(img|iframe|video|audio|object|embed|svg)[^>]*>/i.test(html)) return true;
+  const stripped = html.replace(/<[^>]*>/g, "").replace(/&nbsp;/gi, " ").trim();
+  return stripped.length > 0;
+}
+
+function getHeadingTitle(node: Node): string | null {
+  if (!node || node.nodeType !== 1) return null;
+  const el = node as HTMLElement;
+  const tag = el.tagName ? el.tagName.toLowerCase() : "";
+
+  // 1. Direct H1-H6 element
+  if (["h1", "h2", "h3", "h4", "h5", "h6"].includes(tag)) {
+    const title = cleanTitle(el.textContent || "");
+    return title || null;
+  }
+
+  // 2. Element containing an H1-H6 tag inside it
+  const innerHeader = el.querySelector?.("h1, h2, h3, h4, h5, h6");
+  if (innerHeader) {
+    const title = cleanTitle(innerHeader.textContent || "");
+    if (title) return title;
+  }
+
+  // 3. Check for short strong/bold headers in LI, P, DIV, SPAN
+  if (["li", "p", "div", "span"].includes(tag)) {
+    const text = cleanTitle(el.textContent || "");
+    if (text && text.length >= 2 && text.length <= 110) {
+      const hasStrong = !!el.querySelector?.("strong, b") || ["strong", "b"].includes(tag);
+      const style = el.getAttribute?.("style") || "";
+      const isLargeFont = /font-size:\s*(1[8-9]|[2-9][0-9])px/i.test(style) || /font-weight:\s*bold/i.test(style);
+
+      if (hasStrong || isLargeFont || tag === "li") {
+        return text;
+      }
+    }
+  }
+
+  return null;
+}
+
+function collectBlocks(node: Node): Node[] {
+  if (!node) return [];
+
+  if (node.nodeType === 3) { // TEXT_NODE
+    const text = node.textContent || "";
+    if (text.trim()) {
+      return [node];
+    }
+    return [];
+  }
+
+  if (node.nodeType === 1) { // ELEMENT_NODE
+    const el = node as HTMLElement;
+    const tag = el.tagName ? el.tagName.toLowerCase() : "";
+
+    // H1-H6 are atomic heading blocks
+    if (["h1", "h2", "h3", "h4", "h5", "h6"].includes(tag)) {
+      return [node];
+    }
+
+    // List wrappers <ol>, <ul> -> expand their child list items
+    if (tag === "ol" || tag === "ul") {
+      const blocks: Node[] = [];
+      Array.from(el.childNodes).forEach((child) => {
+        blocks.push(...collectBlocks(child));
+      });
+      return blocks;
+    }
+
+    // List item <li>
+    if (tag === "li") {
+      const hasHTag = el.querySelector("h1, h2, h3, h4, h5, h6");
+      if (hasHTag) {
+        const blocks: Node[] = [];
+        Array.from(el.childNodes).forEach((child) => {
+          blocks.push(...collectBlocks(child));
+        });
+        return blocks;
+      }
+      return [node];
+    }
+
+    // Structural containers: <div>, <section>, <article>, <blockquote>, <main>
+    if (["div", "section", "article", "blockquote", "main"].includes(tag)) {
+      const hasHeadingsOrLists = el.querySelector("h1, h2, h3, h4, h5, h6, ol, ul");
+      if (hasHeadingsOrLists) {
+        const blocks: Node[] = [];
+        Array.from(el.childNodes).forEach((child) => {
+          blocks.push(...collectBlocks(child));
+        });
+        return blocks;
+      }
+      return [node];
+    }
+
+    return [node];
+  }
+
+  return [];
+}
+
 export function parseHtmlToChapters(html: string, fallbackTitle: string = "مقدمه"): StructuredChapter[] {
-  const contentHtml = String(html || "");
-  
+  const contentHtml = String(html || "").trim();
+  if (!contentHtml) {
+    return [{ order: 1, title: fallbackTitle, content: "<p>محتوای این بخش خالی است.</p>" }];
+  }
+
   try {
-    // Create an offline DOM wrapper if environment supports it
     if (typeof window === "undefined" || typeof document === "undefined") {
       return [{ order: 1, title: fallbackTitle, content: contentHtml }];
     }
 
     const container = document.createElement("div");
     container.innerHTML = contentHtml;
+
+    const topBlocks: Node[] = [];
+    Array.from(container.childNodes).forEach((node) => {
+      topBlocks.push(...collectBlocks(node));
+    });
+
+    if (topBlocks.length === 0) {
+      return [{ order: 1, title: fallbackTitle, content: contentHtml }];
+    }
 
     const chapters: StructuredChapter[] = [];
     let currentTitle = fallbackTitle;
@@ -28,48 +149,42 @@ export function parseHtmlToChapters(html: string, fallbackTitle: string = "مق�
 
     const flush = () => {
       const rawContent = currentBuffer.join("").trim();
-      if (rawContent || chapters.length === 0) {
+      if (hasVisibleContent(rawContent)) {
         chapters.push({
           order: orderCounter++,
-          title: (currentTitle || "").trim() || `بخش ${orderCounter - 1}`,
-          content: rawContent || "<p>محتوای این بخش خالی است.</p>"
+          title: (currentTitle || "").trim() || `بخش ${orderCounter}`,
+          content: rawContent
         });
       }
       currentBuffer = [];
     };
 
-    // Convert childNodes or children
-    const children = Array.from(container.childNodes);
-    
-    if (children.length === 0 && contentHtml.trim()) {
-      return [{ order: 1, title: fallbackTitle, content: contentHtml }];
-    }
-
-    children.forEach((node) => {
+    topBlocks.forEach((node) => {
       if (!node) return;
-      if (node.nodeType === 1) { // ELEMENT_NODE
-        const el = node as HTMLElement;
-        const tag = el.tagName ? el.tagName.toLowerCase() : "";
-        const isHeading = ["h1", "h2", "h3", "h4", "h5", "h6"].includes(tag);
 
-        if (isHeading) {
-          // Flush previous accumulator
-          flush();
-          // New heading text
-          currentTitle = el.textContent || `بخش ${orderCounter}`;
-        } else {
+      const headingTitle = getHeadingTitle(node);
+
+      if (headingTitle) {
+        flush();
+        currentTitle = headingTitle;
+      } else {
+        if (node.nodeType === 1) {
+          const el = node as HTMLElement;
           currentBuffer.push(el.outerHTML || "");
-        }
-      } else if (node.nodeType === 3) { // TEXT_NODE
-        const text = node.textContent || "";
-        if (text.trim()) {
-          currentBuffer.push(text);
+        } else if (node.nodeType === 3) {
+          const text = node.textContent || "";
+          if (text.trim()) {
+            currentBuffer.push(text);
+          }
         }
       }
     });
 
-    // Final flush
     flush();
+
+    if (chapters.length === 0) {
+      return [{ order: 1, title: fallbackTitle, content: contentHtml }];
+    }
 
     return chapters;
   } catch (err) {
