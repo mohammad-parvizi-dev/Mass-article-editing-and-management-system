@@ -3,7 +3,7 @@ import { parseHtmlToChapters, transformToSiteJson, stripImages, StructuredChapte
 import { Article } from "../types";
 import { 
   Sparkles, Layers, FileJson, Check, Copy, HelpCircle, FileText, ChevronDown, CheckCircle, Flame, Download, ImageOff, Trash2,
-  RefreshCw, Play, Pause, AlertTriangle, Languages, Link as LinkIcon, Cpu, Clock, Filter
+  RefreshCw, Play, Pause, AlertTriangle, Languages, Link as LinkIcon, Cpu, Clock, Filter, User
 } from "lucide-react";
 
 interface ChapterizerPanelProps {
@@ -23,6 +23,15 @@ export default function ChapterizerPanel({
   const [activeTab, setActiveTab] = useState<"single" | "bulk">("single");
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [copiedObj, setCopiedObj] = useState<boolean>(false);
+
+  const [exportAuthor, setExportAuthor] = useState<string>(() => {
+    return localStorage.getItem("site_json_author") || "mohammadpp955.pp955@gmail.com";
+  });
+
+  const handleAuthorChange = (newVal: string) => {
+    setExportAuthor(newVal);
+    localStorage.setItem("site_json_author", newVal);
+  };
 
   // Find currently selected article
   const currentArticle = articles.find(a => a.id === selectedArticleId) || null;
@@ -527,7 +536,7 @@ export default function ChapterizerPanel({
     
     // Ensure chapters exist
     const chapters = currentArticle.chapters || parseHtmlToChapters(currentArticle.body, currentArticle.title || "مقدمه");
-    const siteJson = transformToSiteJson(currentArticle, chapters);
+    const siteJson = transformToSiteJson(currentArticle, chapters, exportAuthor);
     
     const blob = new Blob([JSON.stringify(siteJson, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -553,7 +562,7 @@ export default function ChapterizerPanel({
 
     const formattedList = activeArticles.map(art => {
       const chapters = art.chapters || parseHtmlToChapters(art.body, art.title || "مقدمه");
-      return transformToSiteJson(art, chapters);
+      return transformToSiteJson(art, chapters, exportAuthor);
     });
 
     // We export as a master JSON array or as a beautiful wrapper
@@ -581,7 +590,7 @@ export default function ChapterizerPanel({
 
     const formattedList = deletedArticles.map(art => {
       const chapters = art.chapters || parseHtmlToChapters(art.body, art.title || "مقدمه");
-      return transformToSiteJson(art, chapters);
+      return transformToSiteJson(art, chapters, exportAuthor);
     });
 
     const blob = new Blob([JSON.stringify(formattedList, null, 2)], { type: "application/json" });
@@ -601,7 +610,7 @@ export default function ChapterizerPanel({
   const handleCopySingleJson = () => {
     if (!currentArticle) return;
     const chapters = currentArticle.chapters || parseHtmlToChapters(currentArticle.body, currentArticle.title || "مقدمه");
-    const siteJson = transformToSiteJson(currentArticle, chapters);
+    const siteJson = transformToSiteJson(currentArticle, chapters, exportAuthor);
     
     navigator.clipboard.writeText(JSON.stringify(siteJson, null, 2))
       .then(() => {
@@ -645,6 +654,29 @@ export default function ChapterizerPanel({
           >
             عملیات گروهی همه
           </button>
+        </div>
+      </div>
+
+      {/* Global Author Input Field */}
+      <div className="mb-5 p-3.5 bg-slate-900/90 border border-cyan-500/30 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 dir-rtl text-right shadow-inner">
+        <div className="flex items-center gap-2">
+          <User className="w-4.5 h-4.5 text-cyan-400 shrink-0" />
+          <div>
+            <label htmlFor="export-author-input" className="text-xs font-extrabold text-white block cursor-pointer">
+              تنظیم نویسنده خروجی (فیلد author در JSON):
+            </label>
+            <span className="text-[10px] text-slate-400">مقدار مشخص شده در این تک‌فیلد به عنوان نویسنده در تمامی خروجی‌های JSON تکی و کلی سایت قرار خواهد گرفت.</span>
+          </div>
+        </div>
+        <div className="w-full sm:w-80">
+          <input
+            id="export-author-input"
+            type="text"
+            value={exportAuthor}
+            onChange={(e) => handleAuthorChange(e.target.value)}
+            placeholder="mohammadpp955.pp955@gmail.com"
+            className="w-full bg-black/70 border border-white/15 focus:border-cyan-400 text-cyan-200 text-xs py-1.5 px-3 rounded-lg outline-none font-mono dir-ltr text-left placeholder:text-slate-600 transition"
+          />
         </div>
       </div>
 

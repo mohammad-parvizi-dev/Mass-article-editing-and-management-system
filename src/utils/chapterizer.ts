@@ -91,7 +91,7 @@ export function stripImages(html: string): string {
  * transformToSiteJson
  * Returns the exact JSON representation expected by the website database.
  */
-export function transformToSiteJson(art: any, chaptersList: StructuredChapter[]) {
+export function transformToSiteJson(art: any, chaptersList: StructuredChapter[], authorEmail?: string) {
   const currentChapters = chaptersList && chaptersList.length > 0
     ? chaptersList
     : parseHtmlToChapters(art.body, art.title || "مقدمه");
@@ -117,7 +117,7 @@ export function transformToSiteJson(art: any, chaptersList: StructuredChapter[])
     content_type: "ARTICLE",
     product_type: null,
     access_type: "FREE",
-    author: "mohammadpp955.pp955@gmail.com",
+    author: authorEmail?.trim() || "mohammadpp955.pp955@gmail.com",
     categories: articleCategories,
     tags: articleTags,
     subscriptions: [],
@@ -136,11 +136,11 @@ export function transformToSiteJson(art: any, chaptersList: StructuredChapter[])
           fa: {
             title: art.title || "",
             description: art.description || "",
-            long_description: art.description || ""
+            long_description: art.long_summary || ""
           },
           en: {
-            title: "",
-            description: "",
+            title: art.en_title || "",
+            description: art.en_description || "",
             long_description: ""
           }
         },
