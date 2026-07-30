@@ -28,9 +28,20 @@ export default function ChapterizerPanel({
     return localStorage.getItem("site_json_author") || "mohammadpp955.pp955@gmail.com";
   });
 
+  const [exportChunkSize, setExportChunkSize] = useState<number>(() => {
+    const saved = localStorage.getItem("site_json_chunk_size");
+    return saved ? Math.max(1, parseInt(saved, 10) || 50) : 50;
+  });
+
   const handleAuthorChange = (newVal: string) => {
     setExportAuthor(newVal);
     localStorage.setItem("site_json_author", newVal);
+  };
+
+  const handleChunkSizeChange = (val: number) => {
+    const safeVal = isNaN(val) ? 50 : Math.max(1, val);
+    setExportChunkSize(safeVal);
+    localStorage.setItem("site_json_chunk_size", String(safeVal));
   };
 
   // Find currently selected article
@@ -551,8 +562,35 @@ export default function ChapterizerPanel({
     setTimeout(() => setSuccessMsg(null), 4000);
   };
 
-  // 4. Export All Articles Bulk Site JSON List (Array of formatted items)
-  const handleExportAllJson = () => {
+  // Helper to trigger chunked downloads (50 items per file)
+  const downloadChunkedJson = async (items: any[], baseFileName: string, chunkSize: number = 50) => {
+    const totalParts = Math.ceil(items.length / chunkSize);
+    for (let i = 0; i < totalParts; i++) {
+      const chunk = items.slice(i * chunkSize, (i + 1) * chunkSize);
+      const partNum = i + 1;
+      const fileName = totalParts === 1
+        ? `${baseFileName}.json`
+        : `${baseFileName}-part${partNum}-of-${totalParts}.json`;
+
+      const blob = new Blob([JSON.stringify(chunk, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+      if (i < totalParts - 1) {
+        await new Promise(res => setTimeout(res, 300));
+      }
+    }
+    return totalParts;
+  };
+
+  // 4. Export All Articles Bulk Site JSON List (Split into files of 50)
+  const handleExportAllJson = async () => {
     const activeArticles = articles.filter(art => art.is_published !== "2");
     if (activeArticles.length === 0) {
       setSuccessMsg("هیچ مقاله فعالی (غیر حذف شده) برای صادر کردن یافت نشد.");
@@ -565,26 +603,22 @@ export default function ChapterizerPanel({
       return transformToSiteJson(art, chapters, exportAuthor);
     });
 
-    // We export as a master JSON array or as a beautiful wrapper
-    const blob = new Blob([JSON.stringify(formattedList, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `all-articles-site-export.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const totalParts = await downloadChunkedJson(formattedList, "all-articles-site-export", exportChunkSize);
 
-    setSuccessMsg(`فایل دیتابیس جامع حاوی ${activeArticles.length} مقاله فعال با موفقیت دانلود شد.`);
+    if (totalParts > 1) {
+      setSuccessMsg(`تعداد ${activeArticles.length} مقاله فعال در قالب ${totalParts} فایل JSON (پارت‌های ${exportChunkSize}تایی) دانلود شد.`);
+    } else {
+      setSuccessMsg(`فایل دیتابیس جامع حاوی ${activeArticles.length} مقاله فعال با موفقیت دانلود شد.`);
+    }
     setTimeout(() => setSuccessMsg(null), 5000);
   };
 
-  // 4-b. Export Only Deleted Articles Bulk JSON List
-  const handleExportDeletedJson = () => {
+  // 4-b. Export Only Deleted Articles Bulk JSON List (Split into dynamic chunkSize files)
+  const handleExportDeletedJson = async () => {
     const deletedArticles = articles.filter(art => art.is_published === "2");
     if (deletedArticles.length === 0) {
       setSuccessMsg("هیچ فراداده و مقاله‌ای با وضعیت «حذف شده» جهت صادرات یافت نشد.");
-      setTimeout(() => setSuccessMsg(null), 5000);
+      setTimeout(() => setSuccessMsg(null), 4000);
       return;
     }
 
@@ -593,16 +627,14 @@ export default function ChapterizerPanel({
       return transformToSiteJson(art, chapters, exportAuthor);
     });
 
-    const blob = new Blob([JSON.stringify(formattedList, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `deleted-articles-backup-${new Date().toISOString().split("T")[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const todayStr = new Date().toISOString().split("T")[0];
+    const totalParts = await downloadChunkedJson(formattedList, `deleted-articles-backup-${todayStr}`, exportChunkSize);
 
-    setSuccessMsg(`فایل پشتیبان حاوی ${deletedArticles.length} مقاله حذف شده با موفقیت دانلود گردید.`);
+    if (totalParts > 1) {
+      setSuccessMsg(`تعداد ${deletedArticles.length} مقاله حذف شده در قالب ${totalParts} فایل JSON (پارت‌های ${exportChunkSize}تایی) دانلود گردید.`);
+    } else {
+      setSuccessMsg(`فایل پشتیبان حاوی ${deletedArticles.length} مقاله حذف شده با موفقیت دانلود گردید.`);
+    }
     setTimeout(() => setSuccessMsg(null), 5000);
   };
 
@@ -657,26 +689,53 @@ export default function ChapterizerPanel({
         </div>
       </div>
 
-      {/* Global Author Input Field */}
-      <div className="mb-5 p-3.5 bg-slate-900/90 border border-cyan-500/30 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 dir-rtl text-right shadow-inner">
-        <div className="flex items-center gap-2">
-          <User className="w-4.5 h-4.5 text-cyan-400 shrink-0" />
-          <div>
-            <label htmlFor="export-author-input" className="text-xs font-extrabold text-white block cursor-pointer">
-              تنظیم نویسنده خروجی (فیلد author در JSON):
-            </label>
-            <span className="text-[10px] text-slate-400">مقدار مشخص شده در این تک‌فیلد به عنوان نویسنده در تمامی خروجی‌های JSON تکی و کلی سایت قرار خواهد گرفت.</span>
+      {/* Global Author & Chunk Size Settings Field */}
+      <div className="mb-5 p-3.5 bg-slate-900/90 border border-cyan-500/30 rounded-xl grid grid-cols-1 lg:grid-cols-12 gap-4 items-center dir-rtl text-right shadow-inner">
+        {/* Author field */}
+        <div className="lg:col-span-7 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <User className="w-4.5 h-4.5 text-cyan-400 shrink-0" />
+            <div>
+              <label htmlFor="export-author-input" className="text-xs font-extrabold text-white block cursor-pointer">
+                تنظیم نویسنده خروجی (فیلد author در JSON):
+              </label>
+              <span className="text-[10px] text-slate-400 block">مقدار نویسنده در تمامی خروجی‌های JSON تکی و کلی قرار می‌گیرد.</span>
+            </div>
+          </div>
+          <div className="w-full sm:w-64 shrink-0">
+            <input
+              id="export-author-input"
+              type="text"
+              value={exportAuthor}
+              onChange={(e) => handleAuthorChange(e.target.value)}
+              placeholder="mohammadpp955.pp955@gmail.com"
+              className="w-full bg-black/70 border border-white/15 focus:border-cyan-400 text-cyan-200 text-xs py-1.5 px-3 rounded-lg outline-none font-mono dir-ltr text-left placeholder:text-slate-600 transition"
+            />
           </div>
         </div>
-        <div className="w-full sm:w-80">
-          <input
-            id="export-author-input"
-            type="text"
-            value={exportAuthor}
-            onChange={(e) => handleAuthorChange(e.target.value)}
-            placeholder="mohammadpp955.pp955@gmail.com"
-            className="w-full bg-black/70 border border-white/15 focus:border-cyan-400 text-cyan-200 text-xs py-1.5 px-3 rounded-lg outline-none font-mono dir-ltr text-left placeholder:text-slate-600 transition"
-          />
+
+        {/* Chunk size field */}
+        <div className="lg:col-span-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-t lg:border-t-0 lg:border-r border-white/10 pt-3 lg:pt-0 lg:pr-4">
+          <div className="flex items-center gap-2">
+            <FileJson className="w-4.5 h-4.5 text-cyan-400 shrink-0" />
+            <div>
+              <label htmlFor="export-chunk-size-input" className="text-xs font-extrabold text-white block cursor-pointer">
+                تعداد مقالات در هر بسته خروجی:
+              </label>
+              <span className="text-[10px] text-slate-400 block">تفکیک خروجی گروهی به پارت‌های چندتایی (پیش‌فرض: ۵۰).</span>
+            </div>
+          </div>
+          <div className="w-full sm:w-24 shrink-0">
+            <input
+              id="export-chunk-size-input"
+              type="number"
+              min={1}
+              max={1000}
+              value={exportChunkSize}
+              onChange={(e) => handleChunkSizeChange(parseInt(e.target.value, 10))}
+              className="w-full bg-black/70 border border-white/15 focus:border-cyan-400 text-cyan-200 text-xs py-1.5 px-3 rounded-lg outline-none font-mono text-center transition"
+            />
+          </div>
         </div>
       </div>
 
